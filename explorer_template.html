@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PA-Burden Drug Savings Explorer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.30.0/plotly.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Spectral:wght@500;600;700&family=Source+Sans+Pro:wght@400;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #F4EFE3;
+    font-family: 'Source Sans Pro', ui-sans-serif, system-ui;
+    color: #1B3A3A;
+  }
+  .ledger-font { font-family: 'IBM Plex Mono', monospace; }
+  .display-font { font-family: 'Spectral', serif; }
+
+  header {
+    border-bottom: 3px double #1B3A3A;
+    padding: 28px 28px 18px;
+    max-width: 1180px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-family: 'Spectral', serif;
+    font-size: 28px;
+    font-weight: 700;
+    margin: 0;
+    letter-spacing: -0.02em;
+    color: #1B3A3A;
+  }
+  .subtitle {
+    margin-top: 6px;
+    color: #4A4538;
+    font-size: 14.5px;
+    max-width: 720px;
+    line-height: 1.5;
+  }
+  .controls {
+    max-width: 1180px;
+    margin: 18px auto 0;
+    padding: 0 28px;
+    display: flex;
+    gap: 28px;
+    flex-wrap: wrap;
+    align-items: flex-end;
+  }
+  .control-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .control-group label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #7C6A4F;
+  }
+  select {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    padding: 7px 10px;
+    border: 1px solid #C9BB9C;
+    border-radius: 2px;
+    background: #FCFAF3;
+    color: #1B3A3A;
+    min-width: 240px;
+    cursor: pointer;
+  }
+  select:focus { outline: none; border-color: #1B3A3A; }
+  .hint {
+    font-size: 12px;
+    color: #7C6A4F;
+    font-style: italic;
+    margin-top: 2px;
+  }
+  #chart {
+    max-width: 1180px;
+    margin: 22px auto 10px;
+    padding: 0 28px;
+  }
+  .chart-box {
+    background: #FCFAF3;
+    border: 1px solid #C9BB9C;
+    border-radius: 4px;
+    padding: 8px;
+  }
+  footer {
+    max-width: 1180px;
+    margin: 0 auto 40px;
+    padding: 0 28px;
+    color: #7C6A4F;
+    font-size: 12px;
+    line-height: 1.6;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .stat-row {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 28px;
+    display: flex;
+    gap: 28px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: #4A4538;
+  }
+  .stat-row span.n { font-weight: 600; color: #1B3A3A; }
+
+  #searchResults table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 4px;
+  }
+  #searchResults th {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #FFFFFF;
+    background: #1B3A3A;
+    padding: 7px 10px;
+    text-align: left;
+  }
+  #searchResults td {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12.5px;
+    padding: 7px 10px;
+    border-bottom: 1px solid #E1D6BC;
+    color: #1B3A3A;
+  }
+  #searchResults tr:hover td { background: #ECE3CC; }
+  .tier-pill {
+    display: inline-block;
+    font-size: 11px;
+    padding: 1px 7px;
+    border-radius: 2px;
+    font-weight: 600;
+  }
+  .tier-High { background: #F6E0DA; color: #9C3B3B; }
+  .tier-Moderate { background: #FBF0D9; color: #8A5A1E; }
+  .no-results { color: #7C6A4F; font-style: italic; font-size: 13px; padding: 6px 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>PA-Burden Drug Savings Explorer</h1>
+  <p class="subtitle">657 Moderate &amp; High prior-authorization-burden drugs from the Cost Plus Drugs catalog,
+  matched to NADAC by NDC. Hover any point for the exact drug, strength, and price. Click a legend entry to
+  isolate a tier; double-click to reset.</p>
+</header>
+
+<div class="controls">
+  <div class="control-group" style="flex: 1 1 260px;">
+    <label for="search">Search by medication name</label>
+    <input type="text" id="search" placeholder="e.g. tofacitinib, abiraterone, sumatriptan…"
+      style="font-family:'IBM Plex Mono',monospace; font-size:13px; padding:7px 10px; border:1px solid #C9BB9C;
+      border-radius:2px; background:#FCFAF3; color:#1B3A3A; width:100%;">
+  </div>
+  <div class="control-group">
+    <label for="xaxis">X axis</label>
+    <select id="xaxis">
+      <option value="cpd_cost">Cost Plus Pack Cost</option>
+      <option value="nadac_cost">NADAC Pack Cost</option>
+      <option value="est_retail">Est. Retail Price (AWP-adjusted)</option>
+    </select>
+  </div>
+  <div class="control-group">
+    <label for="yaxis">Y axis</label>
+    <select id="yaxis">
+      <option value="sav_nadac">Savings vs. NADAC (%)</option>
+      <option value="sav_retail">Savings vs. Est. Retail / AWP (%)</option>
+    </select>
+  </div>
+  <div class="control-group">
+    <label for="logx">X scale</label>
+    <select id="logx">
+      <option value="log">Logarithmic</option>
+      <option value="linear">Linear</option>
+    </select>
+  </div>
+</div>
+
+<div id="searchResults" style="max-width:1180px; margin:14px auto 0; padding:0 28px;"></div>
+
+<div class="stat-row" id="statRow"></div>
+
+<div id="chart">
+  <div class="chart-box">
+    <div id="plot" style="width:100%; height:560px;"></div>
+  </div>
+</div>
+
+<footer>
+  <span>&#9670;</span>
+  <p>Savings vs. NADAC compares Cost Plus to a pharmacy's acquisition cost &mdash; not what a cash-pay patient
+  actually faces. Savings vs. Est. Retail / AWP applies published NADAC-to-AWP ratios (Brand &asymp; NADAC&times;1.25,
+  Generic &asymp; NADAC&times;1.90) as a more realistic stand-in for retail cash price; it is an industry rule of
+  thumb, not a measured price. PA tier (Moderate/High) is a clinical heuristic based on drug class, brand status,
+  and cost &mdash; not measured prior-authorization or denial data.</p>
+</footer>
+
+<script>
+const DATA = __DATA_JSON__;
+
+const AXIS_META = {
+  cpd_cost:   { label: "Cost Plus Pack Cost (USD)", prefix: "$" },
+  nadac_cost: { label: "NADAC Pack Cost (USD)", prefix: "$" },
+  est_retail: { label: "Est. Retail Price, AWP-adjusted (USD)", prefix: "$" },
+  sav_nadac:  { label: "Savings vs. NADAC (%)", prefix: "" },
+  sav_retail: { label: "Savings vs. Est. Retail / AWP (%)", prefix: "" },
+};
+
+const TIER_COLOR = { "Moderate": "#C97B2E", "High": "#9C3B3B" };
+
+function buildTraces(xKey, yKey, query) {
+  const tiers = ["Moderate", "High"];
+  const q = (query || "").trim().toLowerCase();
+  const traces = [];
+
+  tiers.forEach(tier => {
+    const rows = DATA.filter(d => d.tier === tier);
+    const isMatch = rows.map(d => q && d.name.toLowerCase().includes(q));
+    const anyMatch = q && isMatch.some(m => m);
+
+    traces.push({
+      x: rows.map(d => d[xKey]),
+      y: rows.map(d => d[yKey]),
+      mode: "markers",
+      type: "scatter",
+      name: `${tier} PA Burden (n=${rows.length})`,
+      marker: {
+        color: TIER_COLOR[tier],
+        size: rows.map((d, i) => (anyMatch && isMatch[i]) ? 15 : 8),
+        opacity: rows.map((d, i) => (anyMatch && !isMatch[i]) ? 0.12 : 0.7),
+        line: { width: rows.map((d, i) => (anyMatch && isMatch[i]) ? 1.5 : 0), color: "#1B3A3A" },
+      },
+      customdata: rows.map(d => [d.name, d.brand, d.strength, d.type, d.categories,
+                                   d.cpd_total, d.nadac_cost, d.est_retail, d.sav_nadac, d.sav_retail]),
+      hovertemplate:
+        "<b>%{customdata[0]}</b> %{customdata[2]}<br>" +
+        "Brand: %{customdata[1]} (%{customdata[3]})<br>" +
+        "Category: %{customdata[4]}<br>" +
+        "Cost Plus total: $%{customdata[5]:,.2f}<br>" +
+        "NADAC pack cost: $%{customdata[6]:,.2f}<br>" +
+        "Est. retail (AWP): $%{customdata[7]:,.2f}<br>" +
+        "Savings vs NADAC: %{customdata[8]:.1f}%<br>" +
+        "Savings vs Est. Retail: %{customdata[9]:.1f}%" +
+        "<extra></extra>",
+    });
+  });
+  return traces;
+}
+
+function renderSearchResults(query) {
+  const box = document.getElementById("searchResults");
+  const q = (query || "").trim().toLowerCase();
+  if (!q) { box.innerHTML = ""; return; }
+
+  const matches = DATA.filter(d => d.name.toLowerCase().includes(q));
+  if (matches.length === 0) {
+    box.innerHTML = `<div class="no-results">No matches for "${query}" among the 657 Moderate/High PA-burden drugs.</div>`;
+    return;
+  }
+  matches.sort((a, b) => b.sav_retail - a.sav_retail);
+  const rowsHtml = matches.map(d => `
+    <tr>
+      <td>${d.name}</td>
+      <td>${d.strength}</td>
+      <td><span class="tier-pill tier-${d.tier}">${d.tier}</span></td>
+      <td>$${d.cpd_total.toFixed(2)}</td>
+      <td>$${d.nadac_cost.toFixed(2)}</td>
+      <td>$${d.est_retail.toFixed(2)}</td>
+      <td>${d.sav_nadac.toFixed(1)}%</td>
+      <td>${d.sav_retail.toFixed(1)}%</td>
+    </tr>`).join("");
+  box.innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Drug</th><th>Strength</th><th>PA Tier</th>
+        <th>Cost Plus Total</th><th>NADAC Cost</th><th>Est. Retail (AWP)</th>
+        <th>Sav. vs NADAC</th><th>Sav. vs Retail</th>
+      </tr></thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>`;
+}
+
+function median(arr) {
+  const s = [...arr].sort((a, b) => a - b);
+  const n = s.length;
+  return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2;
+}
+
+function render() {
+  const xKey = document.getElementById("xaxis").value;
+  const yKey = document.getElementById("yaxis").value;
+  const xScale = document.getElementById("logx").value;
+  const query = document.getElementById("search").value;
+
+  const traces = buildTraces(xKey, yKey, query);
+
+  const layout = {
+    paper_bgcolor: "#FCFAF3",
+    plot_bgcolor: "#FCFAF3",
+    font: { family: "Source Sans Pro, sans-serif", color: "#1B3A3A", size: 12 },
+    margin: { l: 70, r: 30, t: 20, b: 60 },
+    xaxis: {
+      title: { text: AXIS_META[xKey].label, font: { size: 13 } },
+      type: xScale,
+      gridcolor: "#E1D6BC",
+      zeroline: false,
+      tickprefix: AXIS_META[xKey].prefix,
+      tickformat: AXIS_META[xKey].prefix ? ",.0f" : "",
+    },
+    yaxis: {
+      title: { text: AXIS_META[yKey].label, font: { size: 13 } },
+      gridcolor: "#E1D6BC",
+      zeroline: true,
+      zerolinecolor: "#7C6A4F",
+      zerolinewidth: 1.5,
+      ticksuffix: "%",
+    },
+    legend: { orientation: "h", y: -0.18, font: { size: 12 } },
+    hoverlabel: {
+      bgcolor: "#1B3A3A",
+      font: { color: "#F4EFE3", family: "IBM Plex Mono, monospace", size: 11.5 },
+      bordercolor: "#1B3A3A",
+    },
+  };
+
+  Plotly.react("plot", traces, layout, { responsive: true, displayModeBar: true, modeBarButtonsToRemove: ["lasso2d", "select2d"] });
+  renderSearchResults(query);
+
+  // Stat row
+  const high = DATA.filter(d => d.tier === "High").map(d => d[yKey]);
+  const mod = DATA.filter(d => d.tier === "Moderate").map(d => d[yKey]);
+  document.getElementById("statRow").innerHTML = `
+    <span>Total drugs: <span class="n">${DATA.length}</span></span>
+    <span>High tier median ${AXIS_META[yKey].label.split(" (")[0]}: <span class="n">${median(high).toFixed(1)}%</span></span>
+    <span>Moderate tier median ${AXIS_META[yKey].label.split(" (")[0]}: <span class="n">${median(mod).toFixed(1)}%</span></span>
+  `;
+}
+
+document.getElementById("xaxis").addEventListener("change", render);
+document.getElementById("yaxis").addEventListener("change", render);
+document.getElementById("logx").addEventListener("change", render);
+document.getElementById("search").addEventListener("input", render);
+render();
+</script>
+
+</body>
+</html>

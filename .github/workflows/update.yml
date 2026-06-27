@@ -1,0 +1,60 @@
+name: Refresh NADAC vs Cost Plus Drugs data
+
+on:
+  schedule:
+    # Runs every Thursday at 13:00 UTC (NADAC files are typically published Wednesdays;
+    # this gives CMS a day's buffer before we pull). Adjust as you like:
+    # https://crontab.guru is helpful for editing this expression.
+    - cron: "0 13 * * 4"
+  workflow_dispatch: {}   # lets you trigger it manually from the Actions tab anytime
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests openpyxl
+
+      - name: Run pipeline
+        run: python3 pipeline.py
+
+      - name: Commit refreshed data files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/nadac_vs_costplus.xlsx docs/index.html
+          git diff --staged --quiet || git commit -m "Auto-refresh NADAC/Cost Plus data $(date -u +%Y-%m-%d)"
+          git push
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  deploy:
+    needs: refresh
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
