@@ -42,76 +42,23 @@ OUT_DIR.mkdir(exist_ok=True)
 
 CPD_API = "https://api.costplusdrugs.com/pricelist/cpd"
 
-# Primary: CMS's Socrata-hosted NADAC resource (stable resource ID; CMS refreshes rows in place).
-# Fallback: scrape the Medicaid.gov NADAC landing page for the current dated CSV link.
-NADAC_SOCRATA_CSV = "https://healthdata.gov/resource/wz2f-8ijz.csv?$limit=5000000"
-NADAC_LANDING_PAGE = "https://www.medicaid.gov/medicaid/prescription-drugs/nadac-national-average-drug-acquisition-cost/index.html"
+# Primary: try the well-known, stable direct-download URL pattern across recent dates.
+# NADAC publishes weekly (every Wednesday) plus a monthly file on the first Monday on/after
+# the 15th -- rather than guess which, we just try every day going back ~25 days until one hits.
+# This avoids depending on any dataset ID, which changes every January (NADAC 2026 -> NADAC 2027 -> ...)
+# and avoids depending on any API gateway, which has repeatedly proven less stable than the raw file URLs.
+NADAC_CSV_PATTERN = "https://download.medicaid.gov/data/nadac-national-average-drug-acquisition-cost-{m:02d}-{d:02d}-{y}.csv"
 
-AWP_MULTIPLIER = {"Branded": 1.25, "Generic": 1.90}
-
-HIGH_PA_CATEGORIES = {
-    "Cancer", "Breast Cancer", "Leukemia", "HIV", "Organ Transplant",
-    "Hidradenitis Suppurativa", "Psoriatic Arthritis", "Plaque Psoriasis",
-    "Ulcerative Colitis", "Crohn's Disease", "Multiple sclerosis",
-    "Pulmonary Fibrosis", "Huntington's Disease",
-}
-MODERATE_PA_CATEGORIES = {
-    "Rheumatoid Arthritis", "Gout", "Fertility", "Erectile Dysfunction",
-    "Weight Management", "Migraines", "Endometriosis", "Restless Leg Syndrome",
-    "Overactive Bladder", "Iron Overload", "Wilson Disease", "ALS",
-}
-LOW_PA_CATEGORIES = {
-    "Birth Control", "Infection", "Anti-bacterial", "High Blood Pressure",
-    "High Cholesterol", "Diabetes", "Diuretic", "Steroid", "Pain & Inflammation",
-    "Hormone Therapy", "Thyroid", "Vitamin Deficiency", "Low Blood Sugar",
-}
-
-FONT_NAME = "Arial"
+# Fallback: scrape the (corrected) NADAC landing page for the current dated CSV link.
+NADAC_LANDING_PAGE = "https://www.medicaid.gov/medicaid/nadac"
 
 
 # --------------------------------------------------------------------------
 # Step 1: Download NADAC
 # --------------------------------------------------------------------------
-def download_nadac():
-    """Returns a dict: normalized NDC -> list of row-dicts (date, price, classification, corresponding_generic)."""
-    print("Downloading NADAC data...")
-    rows_text = None
-
-    # Primary: Socrata CSV export (stable URL, no date-guessing required)
-    try:
-        resp = requests.get(NADAC_SOCRATA_CSV, timeout=120)
-        resp.raise_for_status()
-        if len(resp.text) > 1_000_000:  # sanity check: should be tens of MB of CSV text
-            rows_text = resp.text
-            print(f"  Got NADAC via Socrata API ({len(rows_text):,} chars).")
-    except Exception as e:
-        print(f"  Socrata attempt failed: {e}")
-
-    # Fallback: scrape the Medicaid.gov landing page for the current dated CSV link
-    if rows_text is None:
-        print("  Falling back to scraping the NADAC landing page for the current file link...")
-        resp = requests.get(NADAC_LANDING_PAGE, timeout=60)
-        resp.raise_for_status()
-        matches = re.findall(
-            r'https://download\.medicaid\.gov/data/nadac-national-average-drug-acquisition-cost-[\d-]+\.csv',
-            resp.text,
-        )
-        if not matches:
-            raise RuntimeError(
-                "Could not find a NADAC CSV link on the landing page. "
-                "CMS may have changed their page structure -- check "
-                f"{NADAC_LANDING_PAGE} manually."
-            )
-        csv_url = sorted(set(matches))[-1]  # most recent dated file
-        print(f"  Found: {csv_url}")
-        resp = requests.get(csv_url, timeout=120)
-        resp.raise_for_status()
-        rows_text = resp.text
-
+def _parse_nadac_csv_text(rows_text):
     nadac = defaultdict(list)
     reader = csv.DictReader(io.StringIO(rows_text))
-    # Column names differ slightly between the Socrata export and the raw CMS CSV;
-    # handle both.
     for row in reader:
         ndc = (row.get("ndc") or row.get("NDC") or "").replace("-", "")
         price_raw = row.get("nadac_per_unit") or row.get("NADAC Per Unit")
@@ -132,9 +79,72 @@ def download_nadac():
             "date": date_raw, "price": price, "classification": cls_raw,
             "corresponding_generic": corresponding,
         })
+    return nadac
 
+
+def download_nadac():
+    """Returns a dict: normalized NDC -> list of row-dicts (date, price, classification, corresponding_generic)."""
+    import datetime as _dt
+
+    print("Downloading NADAC data...")
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; nadac-cpd-pipeline/1.0)"}
+
+    # --- Primary: guess recent dates against the stable direct-download pattern ---
+    today = _dt.date.today()
+    for days_back in range(0, 28):
+        d = today - _dt.timedelta(days=days_back)
+        url = NADAC_CSV_PATTERN.format(m=d.month, d=d.day, y=d.year)
+        try:
+            resp = requests.get(url, headers=headers, timeout=120)
+            if resp.status_code == 200 and len(resp.text) > 1_000_000:
+                print(f"  Found NADAC file for {d.isoformat()}: {url}")
+                nadac = _parse_nadac_csv_text(resp.text)
+                print(f"  Parsed {len(nadac):,} unique NDCs from NADAC.")
+                return nadac
+        except requests.RequestException:
+            continue
+    print("  Date-guessing exhausted 28 days without a hit. Falling back to landing-page scrape...")
+
+    # --- Fallback: scrape the landing page for whatever dated CSV link is currently posted ---
+    resp = requests.get(NADAC_LANDING_PAGE, headers=headers, timeout=60)
+    resp.raise_for_status()
+    matches = re.findall(
+        r'https://download\.medicaid\.gov/data/nadac-national-average-drug-acquisition-cost-[\d-]+\.csv',
+        resp.text,
+    )
+    if not matches:
+        raise RuntimeError(
+            "Could not find a NADAC CSV link via date-guessing OR the landing page scrape. "
+            f"CMS may have changed their file naming or page structure -- check {NADAC_LANDING_PAGE} "
+            "manually and update NADAC_CSV_PATTERN / NADAC_LANDING_PAGE in pipeline.py."
+        )
+    csv_url = sorted(set(matches))[-1]
+    print(f"  Found via landing page: {csv_url}")
+    resp = requests.get(csv_url, headers=headers, timeout=120)
+    resp.raise_for_status()
+    nadac = _parse_nadac_csv_text(resp.text)
     print(f"  Parsed {len(nadac):,} unique NDCs from NADAC.")
     return nadac
+
+HIGH_PA_CATEGORIES = {
+    "Cancer", "Breast Cancer", "Leukemia", "HIV", "Organ Transplant",
+    "Hidradenitis Suppurativa", "Psoriatic Arthritis", "Plaque Psoriasis",
+    "Ulcerative Colitis", "Crohn's Disease", "Multiple sclerosis",
+    "Pulmonary Fibrosis", "Huntington's Disease",
+}
+MODERATE_PA_CATEGORIES = {
+    "Rheumatoid Arthritis", "Gout", "Fertility", "Erectile Dysfunction",
+    "Weight Management", "Migraines", "Endometriosis", "Restless Leg Syndrome",
+    "Overactive Bladder", "Iron Overload", "Wilson Disease", "ALS",
+}
+LOW_PA_CATEGORIES = {
+    "Birth Control", "Infection", "Anti-bacterial", "High Blood Pressure",
+    "High Cholesterol", "Diabetes", "Diuretic", "Steroid", "Pain & Inflammation",
+    "Hormone Therapy", "Thyroid", "Vitamin Deficiency", "Low Blood Sugar",
+}
+
+AWP_MULTIPLIER = {"Branded": 1.25, "Generic": 1.90}
+FONT_NAME = "Arial"
 
 
 # --------------------------------------------------------------------------
