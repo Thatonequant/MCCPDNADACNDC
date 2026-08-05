@@ -191,7 +191,7 @@
 <div class="controls">
   <div class="control-group" style="flex: 1 1 240px;">
     <label for="search">Search by name</label>
-    <input type="text" id="search" placeholder="e.g. atorvastatin, tofacitinib…" style="width:100%;">
+    <input type="text" id="search" placeholder="e.g. rivaroxaban or Xarelto…" style="width:100%;">
   </div>
   <div class="control-group">
     <label for="tierFilter">PA Burden Tier</label>
@@ -293,7 +293,11 @@ function applyFilters() {
   const type = document.getElementById("typeFilter").value;
 
   return DATA.filter(d => {
-    if (q && !d.name.toLowerCase().includes(q)) return false;
+    if (q) {
+      const nameMatch = d.name.toLowerCase().includes(q);
+      const brandMatch = d.brand && d.brand.toLowerCase().includes(q);
+      if (!nameMatch && !brandMatch) return false;
+    }
     if (tier && d.tier !== tier) return false;
     if (stock && d.in_stock !== stock) return false;
     if (nadacF === "yes" && !d.has_nadac) return false;
