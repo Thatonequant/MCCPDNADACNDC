@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>PA-Burden Drug Savings Explorer</title>
+<title>Cost Plus Drugs Catalog Explorer</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.30.0/plotly.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Spectral:wght@500;600;700&family=Source+Sans+Pro:wght@400;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
@@ -20,7 +20,7 @@
   header {
     border-bottom: 3px double #1B3A3A;
     padding: 28px 28px 18px;
-    max-width: 1180px;
+    max-width: 1280px;
     margin: 0 auto;
   }
   h1 {
@@ -35,15 +35,22 @@
     margin-top: 6px;
     color: #4A4538;
     font-size: 14.5px;
-    max-width: 720px;
+    max-width: 760px;
     line-height: 1.5;
   }
+  .refresh-note {
+    margin-top: 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11.5px;
+    color: #7C6A4F;
+  }
+
   .controls {
-    max-width: 1180px;
+    max-width: 1280px;
     margin: 18px auto 0;
     padding: 0 28px;
     display: flex;
-    gap: 28px;
+    gap: 20px;
     flex-wrap: wrap;
     align-items: flex-end;
   }
@@ -59,7 +66,7 @@
     text-transform: uppercase;
     color: #7C6A4F;
   }
-  select {
+  select, input[type=text] {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 13px;
     padding: 7px 10px;
@@ -67,19 +74,25 @@
     border-radius: 2px;
     background: #FCFAF3;
     color: #1B3A3A;
-    min-width: 240px;
-    cursor: pointer;
   }
-  select:focus { outline: none; border-color: #1B3A3A; }
-  .hint {
+  select:focus, input[type=text]:focus { outline: none; border-color: #1B3A3A; }
+
+  .stat-row {
+    max-width: 1280px;
+    margin: 16px auto 0;
+    padding: 0 28px;
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 12px;
-    color: #7C6A4F;
-    font-style: italic;
-    margin-top: 2px;
+    color: #4A4538;
   }
-  #chart {
-    max-width: 1180px;
-    margin: 22px auto 10px;
+  .stat-row span.n { font-weight: 600; color: #1B3A3A; }
+
+  .chart-section {
+    max-width: 1280px;
+    margin: 22px auto 0;
     padding: 0 28px;
   }
   .chart-box {
@@ -88,9 +101,73 @@
     border-radius: 4px;
     padding: 8px;
   }
+
+  .table-section {
+    max-width: 1280px;
+    margin: 26px auto 0;
+    padding: 0 28px;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #FFFFFF;
+    background: #1B3A3A;
+    padding: 8px 10px;
+    text-align: left;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+  }
+  thead th:hover { background: #244A4A; }
+  tbody td {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12.5px;
+    padding: 7px 10px;
+    border-bottom: 1px solid #E1D6BC;
+    color: #1B3A3A;
+  }
+  tbody tr:hover td { background: #ECE3CC; }
+  .tier-pill {
+    display: inline-block;
+    font-size: 10.5px;
+    padding: 1px 7px;
+    border-radius: 2px;
+    font-weight: 600;
+  }
+  .tier-High { background: #F6E0DA; color: #9C3B3B; }
+  .tier-Moderate { background: #FBF0D9; color: #8A5A1E; }
+  .tier-Low { background: #E5EFE3; color: #3E6B4A; }
+  .no-nadac { color: #B0A483; font-style: italic; }
+  .no-results { color: #7C6A4F; font-style: italic; font-size: 13px; padding: 20px 0; text-align: center; }
+
+  .pagination {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: #4A4538;
+  }
+  .pagination button {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    padding: 5px 12px;
+    border: 1px solid #C9BB9C;
+    background: #FCFAF3;
+    color: #1B3A3A;
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  .pagination button:disabled { opacity: 0.35; cursor: default; }
+  .pagination button:not(:disabled):hover { background: #ECE3CC; }
+
   footer {
-    max-width: 1180px;
-    margin: 0 auto 40px;
+    max-width: 1280px;
+    margin: 30px auto 50px;
     padding: 0 28px;
     color: #7C6A4F;
     font-size: 12px;
@@ -99,257 +176,250 @@
     gap: 10px;
     align-items: flex-start;
   }
-  .stat-row {
-    max-width: 1180px;
-    margin: 0 auto;
-    padding: 0 28px;
-    display: flex;
-    gap: 28px;
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 12px;
-    color: #4A4538;
-  }
-  .stat-row span.n { font-weight: 600; color: #1B3A3A; }
-
-  #searchResults table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 4px;
-  }
-  #searchResults th {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 10.5px;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    color: #FFFFFF;
-    background: #1B3A3A;
-    padding: 7px 10px;
-    text-align: left;
-  }
-  #searchResults td {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 12.5px;
-    padding: 7px 10px;
-    border-bottom: 1px solid #E1D6BC;
-    color: #1B3A3A;
-  }
-  #searchResults tr:hover td { background: #ECE3CC; }
-  .tier-pill {
-    display: inline-block;
-    font-size: 11px;
-    padding: 1px 7px;
-    border-radius: 2px;
-    font-weight: 600;
-  }
-  .tier-High { background: #F6E0DA; color: #9C3B3B; }
-  .tier-Moderate { background: #FBF0D9; color: #8A5A1E; }
-  .no-results { color: #7C6A4F; font-style: italic; font-size: 13px; padding: 6px 0; }
 </style>
 </head>
 <body>
 
 <header>
-  <h1>PA-Burden Drug Savings Explorer</h1>
-  <p class="subtitle">657 Moderate &amp; High prior-authorization-burden drugs from the Cost Plus Drugs catalog,
-  matched to NADAC by NDC. Hover any point for the exact drug, strength, and price. Click a legend entry to
-  isolate a tier; double-click to reset.</p>
+  <h1>Cost Plus Drugs Catalog Explorer</h1>
+  <p class="subtitle">The full Cost Plus Drugs catalog, pulled live from their pricing API and matched to CMS
+  NADAC data by NDC where possible. Search, filter, sort, and click any column header to re-sort. Drugs without
+  a NADAC match are shown, not hidden, and clearly flagged.</p>
+  <p class="refresh-note">This page auto-refreshes weekly via a scheduled pipeline.</p>
 </header>
 
 <div class="controls">
-  <div class="control-group" style="flex: 1 1 260px;">
-    <label for="search">Search by medication name</label>
-    <input type="text" id="search" placeholder="e.g. tofacitinib, abiraterone, sumatriptan…"
-      style="font-family:'IBM Plex Mono',monospace; font-size:13px; padding:7px 10px; border:1px solid #C9BB9C;
-      border-radius:2px; background:#FCFAF3; color:#1B3A3A; width:100%;">
+  <div class="control-group" style="flex: 1 1 240px;">
+    <label for="search">Search by name</label>
+    <input type="text" id="search" placeholder="e.g. atorvastatin, tofacitinib…" style="width:100%;">
   </div>
   <div class="control-group">
-    <label for="xaxis">X axis</label>
-    <select id="xaxis">
-      <option value="cpd_cost">Cost Plus Pack Cost</option>
-      <option value="nadac_cost">NADAC Pack Cost</option>
-      <option value="est_retail">Est. Retail Price (AWP-adjusted)</option>
+    <label for="tierFilter">PA Burden Tier</label>
+    <select id="tierFilter">
+      <option value="">All tiers</option>
+      <option value="High">High</option>
+      <option value="Moderate">Moderate</option>
+      <option value="Low">Low</option>
     </select>
   </div>
   <div class="control-group">
-    <label for="yaxis">Y axis</label>
-    <select id="yaxis">
-      <option value="sav_nadac">Savings vs. NADAC (%)</option>
-      <option value="sav_retail">Savings vs. Est. Retail / AWP (%)</option>
+    <label for="stockFilter">Stock status</label>
+    <select id="stockFilter">
+      <option value="">All</option>
+      <option value="Yes">In stock</option>
+      <option value="No">Out of stock</option>
     </select>
   </div>
   <div class="control-group">
-    <label for="logx">X scale</label>
-    <select id="logx">
-      <option value="log">Logarithmic</option>
-      <option value="linear">Linear</option>
+    <label for="nadacFilter">NADAC match</label>
+    <select id="nadacFilter">
+      <option value="">All drugs</option>
+      <option value="yes">Matched only</option>
+      <option value="no">Unmatched only</option>
+    </select>
+  </div>
+  <div class="control-group">
+    <label for="typeFilter">Type</label>
+    <select id="typeFilter">
+      <option value="">All</option>
+      <option value="Generic">Generic</option>
+      <option value="Branded">Branded</option>
     </select>
   </div>
 </div>
 
-<div id="searchResults" style="max-width:1180px; margin:14px auto 0; padding:0 28px;"></div>
-
 <div class="stat-row" id="statRow"></div>
 
-<div id="chart">
+<div class="chart-section">
   <div class="chart-box">
-    <div id="plot" style="width:100%; height:560px;"></div>
+    <div id="plot" style="width:100%; height:480px;"></div>
+  </div>
+</div>
+
+<div class="table-section">
+  <table>
+    <thead>
+      <tr>
+        <th data-key="name">Drug</th>
+        <th data-key="strength">Strength</th>
+        <th data-key="type">Type</th>
+        <th data-key="tier">PA Tier</th>
+        <th data-key="cpd_cost">Cost Plus /Unit Pack</th>
+        <th data-key="nadac_cost">NADAC Pack Cost</th>
+        <th data-key="sav_nadac">Savings vs NADAC</th>
+        <th data-key="in_stock">In Stock</th>
+      </tr>
+    </thead>
+    <tbody id="tableBody"></tbody>
+  </table>
+  <div id="noResults" class="no-results" style="display:none;">No drugs match the current filters.</div>
+  <div class="pagination">
+    <button id="prevPage">&larr; Prev</button>
+    <span id="pageInfo"></span>
+    <button id="nextPage">Next &rarr;</button>
   </div>
 </div>
 
 <footer>
   <span>&#9670;</span>
-  <p>Savings vs. NADAC compares Cost Plus to a pharmacy's acquisition cost &mdash; not what a cash-pay patient
-  actually faces. Savings vs. Est. Retail / AWP applies published NADAC-to-AWP ratios (Brand &asymp; NADAC&times;1.25,
-  Generic &asymp; NADAC&times;1.90) as a more realistic stand-in for retail cash price; it is an industry rule of
-  thumb, not a measured price. PA tier (Moderate/High) is a clinical heuristic based on drug class, brand status,
-  and cost &mdash; not measured prior-authorization or denial data.</p>
+  <p>Cost Plus per-unit pack cost excludes their dispensing fee (~$5) and shipping (~$5.25); NADAC pack cost is
+  pharmacy acquisition cost, not a cash-pay price. PA Tier is a clinical heuristic based on drug class, brand
+  status, and cost &mdash; not measured prior-authorization or denial data. Cost Plus does not carry controlled
+  substances or most cold-chain injectables, so some common drugs will never appear here. This is a methodology
+  demonstration, not medical or financial advice.</p>
 </footer>
 
 <script>
 const DATA = __DATA_JSON__;
+const PAGE_SIZE = 50;
+let currentPage = 0;
+let sortKey = "sav_nadac";
+let sortDir = "desc";
 
-const AXIS_META = {
-  cpd_cost:   { label: "Cost Plus Pack Cost (USD)", prefix: "$" },
-  nadac_cost: { label: "NADAC Pack Cost (USD)", prefix: "$" },
-  est_retail: { label: "Est. Retail Price, AWP-adjusted (USD)", prefix: "$" },
-  sav_nadac:  { label: "Savings vs. NADAC (%)", prefix: "" },
-  sav_retail: { label: "Savings vs. Est. Retail / AWP (%)", prefix: "" },
-};
-
-const TIER_COLOR = { "Moderate": "#C97B2E", "High": "#9C3B3B" };
-
-function buildTraces(xKey, yKey, query) {
-  const tiers = ["Moderate", "High"];
-  const q = (query || "").trim().toLowerCase();
-  const traces = [];
-
-  tiers.forEach(tier => {
-    const rows = DATA.filter(d => d.tier === tier);
-    const isMatch = rows.map(d => q && d.name.toLowerCase().includes(q));
-    const anyMatch = q && isMatch.some(m => m);
-
-    traces.push({
-      x: rows.map(d => d[xKey]),
-      y: rows.map(d => d[yKey]),
-      mode: "markers",
-      type: "scatter",
-      name: `${tier} PA Burden (n=${rows.length})`,
-      marker: {
-        color: TIER_COLOR[tier],
-        size: rows.map((d, i) => (anyMatch && isMatch[i]) ? 15 : 8),
-        opacity: rows.map((d, i) => (anyMatch && !isMatch[i]) ? 0.12 : 0.7),
-        line: { width: rows.map((d, i) => (anyMatch && isMatch[i]) ? 1.5 : 0), color: "#1B3A3A" },
-      },
-      customdata: rows.map(d => [d.name, d.brand, d.strength, d.type, d.categories,
-                                   d.cpd_total, d.nadac_cost, d.est_retail, d.sav_nadac, d.sav_retail]),
-      hovertemplate:
-        "<b>%{customdata[0]}</b> %{customdata[2]}<br>" +
-        "Brand: %{customdata[1]} (%{customdata[3]})<br>" +
-        "Category: %{customdata[4]}<br>" +
-        "Cost Plus total: $%{customdata[5]:,.2f}<br>" +
-        "NADAC pack cost: $%{customdata[6]:,.2f}<br>" +
-        "Est. retail (AWP): $%{customdata[7]:,.2f}<br>" +
-        "Savings vs NADAC: %{customdata[8]:.1f}%<br>" +
-        "Savings vs Est. Retail: %{customdata[9]:.1f}%" +
-        "<extra></extra>",
-    });
-  });
-  return traces;
-}
-
-function renderSearchResults(query) {
-  const box = document.getElementById("searchResults");
-  const q = (query || "").trim().toLowerCase();
-  if (!q) { box.innerHTML = ""; return; }
-
-  const matches = DATA.filter(d => d.name.toLowerCase().includes(q));
-  if (matches.length === 0) {
-    box.innerHTML = `<div class="no-results">No matches for "${query}" among the 657 Moderate/High PA-burden drugs.</div>`;
-    return;
-  }
-  matches.sort((a, b) => b.sav_retail - a.sav_retail);
-  const rowsHtml = matches.map(d => `
-    <tr>
-      <td>${d.name}</td>
-      <td>${d.strength}</td>
-      <td><span class="tier-pill tier-${d.tier}">${d.tier}</span></td>
-      <td>$${d.cpd_total.toFixed(2)}</td>
-      <td>$${d.nadac_cost.toFixed(2)}</td>
-      <td>$${d.est_retail.toFixed(2)}</td>
-      <td>${d.sav_nadac.toFixed(1)}%</td>
-      <td>${d.sav_retail.toFixed(1)}%</td>
-    </tr>`).join("");
-  box.innerHTML = `
-    <table>
-      <thead><tr>
-        <th>Drug</th><th>Strength</th><th>PA Tier</th>
-        <th>Cost Plus Total</th><th>NADAC Cost</th><th>Est. Retail (AWP)</th>
-        <th>Sav. vs NADAC</th><th>Sav. vs Retail</th>
-      </tr></thead>
-      <tbody>${rowsHtml}</tbody>
-    </table>`;
-}
+const TIER_COLOR = { "Low": "#5B8266", "Moderate": "#C97B2E", "High": "#9C3B3B" };
 
 function median(arr) {
+  if (arr.length === 0) return 0;
   const s = [...arr].sort((a, b) => a - b);
   const n = s.length;
   return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2;
 }
 
-function render() {
-  const xKey = document.getElementById("xaxis").value;
-  const yKey = document.getElementById("yaxis").value;
-  const xScale = document.getElementById("logx").value;
-  const query = document.getElementById("search").value;
+function applyFilters() {
+  const q = document.getElementById("search").value.trim().toLowerCase();
+  const tier = document.getElementById("tierFilter").value;
+  const stock = document.getElementById("stockFilter").value;
+  const nadacF = document.getElementById("nadacFilter").value;
+  const type = document.getElementById("typeFilter").value;
 
-  const traces = buildTraces(xKey, yKey, query);
+  return DATA.filter(d => {
+    if (q && !d.name.toLowerCase().includes(q)) return false;
+    if (tier && d.tier !== tier) return false;
+    if (stock && d.in_stock !== stock) return false;
+    if (nadacF === "yes" && !d.has_nadac) return false;
+    if (nadacF === "no" && d.has_nadac) return false;
+    if (type && d.type !== type) return false;
+    return true;
+  });
+}
+
+function sortRows(rows) {
+  return [...rows].sort((a, b) => {
+    let av = a[sortKey], bv = b[sortKey];
+    if (av === undefined || av === null) av = sortKey === "name" ? "" : -Infinity;
+    if (bv === undefined || bv === null) bv = sortKey === "name" ? "" : -Infinity;
+    if (typeof av === "string") {
+      return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
+    }
+    return sortDir === "asc" ? av - bv : bv - av;
+  });
+}
+
+function renderTable(rows) {
+  const tbody = document.getElementById("tableBody");
+  const noResults = document.getElementById("noResults");
+  if (rows.length === 0) {
+    tbody.innerHTML = "";
+    noResults.style.display = "block";
+    document.getElementById("pageInfo").textContent = "";
+    document.getElementById("prevPage").disabled = true;
+    document.getElementById("nextPage").disabled = true;
+    return;
+  }
+  noResults.style.display = "none";
+
+  const totalPages = Math.ceil(rows.length / PAGE_SIZE);
+  currentPage = Math.min(currentPage, totalPages - 1);
+  const start = currentPage * PAGE_SIZE;
+  const pageRows = rows.slice(start, start + PAGE_SIZE);
+
+  tbody.innerHTML = pageRows.map(d => `
+    <tr>
+      <td>${d.name}${d.brand ? ` <span style="color:#7C6A4F;">(${d.brand})</span>` : ""}</td>
+      <td>${d.strength}</td>
+      <td>${d.type}</td>
+      <td><span class="tier-pill tier-${d.tier}">${d.tier}</span></td>
+      <td>$${d.cpd_cost.toFixed(2)}</td>
+      <td>${d.has_nadac ? "$" + d.nadac_cost.toFixed(2) : '<span class="no-nadac">no match</span>'}</td>
+      <td>${d.has_nadac ? d.sav_nadac.toFixed(1) + "%" : '<span class="no-nadac">&mdash;</span>'}</td>
+      <td>${d.in_stock === "Yes" ? "Yes" : '<span style="color:#9C3B3B;">No</span>'}</td>
+    </tr>`).join("");
+
+  document.getElementById("pageInfo").textContent =
+    `Showing ${start + 1}-${Math.min(start + PAGE_SIZE, rows.length)} of ${rows.length}`;
+  document.getElementById("prevPage").disabled = currentPage === 0;
+  document.getElementById("nextPage").disabled = currentPage >= totalPages - 1;
+}
+
+function renderChart(rows) {
+  const withNadac = rows.filter(d => d.has_nadac && d.cpd_cost > 0);
+  const tiers = ["Low", "Moderate", "High"];
+  const traces = tiers.map(tier => {
+    const tRows = withNadac.filter(d => d.tier === tier);
+    return {
+      x: tRows.map(d => d.cpd_cost),
+      y: tRows.map(d => d.sav_nadac),
+      mode: "markers",
+      type: "scatter",
+      name: `${tier} (n=${tRows.length})`,
+      marker: { color: TIER_COLOR[tier], size: 6, opacity: 0.55, line: { width: 0 } },
+      customdata: tRows.map(d => [d.name, d.strength, d.brand]),
+      hovertemplate: "<b>%{customdata[0]}</b> %{customdata[1]}<br>Cost Plus: $%{x:,.2f}<br>Savings vs NADAC: %{y:.1f}%<extra></extra>",
+    };
+  });
 
   const layout = {
     paper_bgcolor: "#FCFAF3",
     plot_bgcolor: "#FCFAF3",
     font: { family: "Source Sans Pro, sans-serif", color: "#1B3A3A", size: 12 },
-    margin: { l: 70, r: 30, t: 20, b: 60 },
-    xaxis: {
-      title: { text: AXIS_META[xKey].label, font: { size: 13 } },
-      type: xScale,
-      gridcolor: "#E1D6BC",
-      zeroline: false,
-      tickprefix: AXIS_META[xKey].prefix,
-      tickformat: AXIS_META[xKey].prefix ? ",.0f" : "",
-    },
-    yaxis: {
-      title: { text: AXIS_META[yKey].label, font: { size: 13 } },
-      gridcolor: "#E1D6BC",
-      zeroline: true,
-      zerolinecolor: "#7C6A4F",
-      zerolinewidth: 1.5,
-      ticksuffix: "%",
-    },
-    legend: { orientation: "h", y: -0.18, font: { size: 12 } },
-    hoverlabel: {
-      bgcolor: "#1B3A3A",
-      font: { color: "#F4EFE3", family: "IBM Plex Mono, monospace", size: 11.5 },
-      bordercolor: "#1B3A3A",
-    },
+    margin: { l: 60, r: 20, t: 10, b: 50 },
+    xaxis: { title: { text: "Cost Plus Pack Cost (USD, log scale)", font: { size: 12.5 } }, type: "log", gridcolor: "#E1D6BC", tickprefix: "$" },
+    yaxis: { title: { text: "Savings vs. NADAC (%)", font: { size: 12.5 } }, gridcolor: "#E1D6BC", zeroline: true, zerolinecolor: "#7C6A4F", zerolinewidth: 1.5, ticksuffix: "%" },
+    legend: { orientation: "h", y: -0.22, font: { size: 11.5 } },
+    hoverlabel: { bgcolor: "#1B3A3A", font: { color: "#F4EFE3", family: "IBM Plex Mono, monospace", size: 11 } },
   };
-
   Plotly.react("plot", traces, layout, { responsive: true, displayModeBar: true, modeBarButtonsToRemove: ["lasso2d", "select2d"] });
-  renderSearchResults(query);
+}
 
-  // Stat row
-  const high = DATA.filter(d => d.tier === "High").map(d => d[yKey]);
-  const mod = DATA.filter(d => d.tier === "Moderate").map(d => d[yKey]);
+function render() {
+  const filtered = sortRows(applyFilters());
+  renderChart(filtered);
+  renderTable(filtered);
+
+  const withNadac = filtered.filter(d => d.has_nadac);
+  const sav = withNadac.map(d => d.sav_nadac);
+  const inStockCount = filtered.filter(d => d.in_stock === "Yes").length;
   document.getElementById("statRow").innerHTML = `
-    <span>Total drugs: <span class="n">${DATA.length}</span></span>
-    <span>High tier median ${AXIS_META[yKey].label.split(" (")[0]}: <span class="n">${median(high).toFixed(1)}%</span></span>
-    <span>Moderate tier median ${AXIS_META[yKey].label.split(" (")[0]}: <span class="n">${median(mod).toFixed(1)}%</span></span>
+    <span>Showing: <span class="n">${filtered.length.toLocaleString()}</span> of ${DATA.length.toLocaleString()} drugs</span>
+    <span>NADAC-matched: <span class="n">${withNadac.length.toLocaleString()}</span></span>
+    <span>In stock: <span class="n">${inStockCount.toLocaleString()}</span></span>
+    <span>Median savings vs NADAC: <span class="n">${withNadac.length ? median(sav).toFixed(1) : "—"}%</span></span>
   `;
 }
 
-document.getElementById("xaxis").addEventListener("change", render);
-document.getElementById("yaxis").addEventListener("change", render);
-document.getElementById("logx").addEventListener("change", render);
-document.getElementById("search").addEventListener("input", render);
+document.getElementById("search").addEventListener("input", () => { currentPage = 0; render(); });
+document.getElementById("tierFilter").addEventListener("change", () => { currentPage = 0; render(); });
+document.getElementById("stockFilter").addEventListener("change", () => { currentPage = 0; render(); });
+document.getElementById("nadacFilter").addEventListener("change", () => { currentPage = 0; render(); });
+document.getElementById("typeFilter").addEventListener("change", () => { currentPage = 0; render(); });
+
+document.querySelectorAll("thead th").forEach(th => {
+  th.addEventListener("click", () => {
+    const key = th.dataset.key;
+    if (sortKey === key) {
+      sortDir = sortDir === "asc" ? "desc" : "asc";
+    } else {
+      sortKey = key;
+      sortDir = "desc";
+    }
+    currentPage = 0;
+    render();
+  });
+});
+
+document.getElementById("prevPage").addEventListener("click", () => { currentPage--; render(); });
+document.getElementById("nextPage").addEventListener("click", () => { currentPage++; render(); });
+
 render();
 </script>
 

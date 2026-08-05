@@ -7,7 +7,9 @@ matches them by NDC, classifies drugs by estimated prior-authorization (PA)
 burden, and produces:
 
   docs/nadac_vs_costplus.xlsx   - full multi-tab analysis workbook
-  docs/index.html               - interactive search/scatter explorer
+  docs/index.html               - interactive search/scatter explorer,
+                                   covering the FULL Cost Plus catalog
+                                   (all drugs, not just Moderate/High PA tier)
 
 Run locally with:  python3 pipeline.py
 Designed to also run unattended in GitHub Actions (see .github/workflows/update.yml).
@@ -20,6 +22,9 @@ IMPORTANT CAVEATS (carried over from the original analysis):
     brand status, and cost -- NOT measured prior-authorization or denial data.
   - Cost Plus does not carry controlled substances or most cold-chain injectables;
     those will simply never appear in the matched set.
+  - Some Cost Plus drugs will have NO NADAC match (different/newer NDC, packaging
+    variant not in NADAC's file, etc.) -- these are still shown in the full-catalog
+    explorer, flagged as unmatched, rather than silently dropped.
 """
 
 import csv
@@ -42,15 +47,33 @@ OUT_DIR.mkdir(exist_ok=True)
 
 CPD_API = "https://api.costplusdrugs.com/pricelist/cpd"
 
-# Primary: try the well-known, stable direct-download URL pattern across recent dates.
-# NADAC publishes weekly (every Wednesday) plus a monthly file on the first Monday on/after
-# the 15th -- rather than guess which, we just try every day going back ~25 days until one hits.
-# This avoids depending on any dataset ID, which changes every January (NADAC 2026 -> NADAC 2027 -> ...)
-# and avoids depending on any API gateway, which has repeatedly proven less stable than the raw file URLs.
+# Direct-download URL pattern for NADAC's weekly CSV. We try this across recent
+# dates (NADAC publishes weekly) rather than depending on any CMS dataset ID or
+# API gateway, both of which have proven to change/break more often than this
+# raw file-naming convention.
 NADAC_CSV_PATTERN = "https://download.medicaid.gov/data/nadac-national-average-drug-acquisition-cost-{m:02d}-{d:02d}-{y}.csv"
-
-# Fallback: scrape the (corrected) NADAC landing page for the current dated CSV link.
 NADAC_LANDING_PAGE = "https://www.medicaid.gov/medicaid/nadac"
+
+AWP_MULTIPLIER = {"Branded": 1.25, "Generic": 1.90}
+
+HIGH_PA_CATEGORIES = {
+    "Cancer", "Breast Cancer", "Leukemia", "HIV", "Organ Transplant",
+    "Hidradenitis Suppurativa", "Psoriatic Arthritis", "Plaque Psoriasis",
+    "Ulcerative Colitis", "Crohn's Disease", "Multiple sclerosis",
+    "Pulmonary Fibrosis", "Huntington's Disease",
+}
+MODERATE_PA_CATEGORIES = {
+    "Rheumatoid Arthritis", "Gout", "Fertility", "Erectile Dysfunction",
+    "Weight Management", "Migraines", "Endometriosis", "Restless Leg Syndrome",
+    "Overactive Bladder", "Iron Overload", "Wilson Disease", "ALS",
+}
+LOW_PA_CATEGORIES = {
+    "Birth Control", "Infection", "Anti-bacterial", "High Blood Pressure",
+    "High Cholesterol", "Diabetes", "Diuretic", "Steroid", "Pain & Inflammation",
+    "Hormone Therapy", "Thyroid", "Vitamin Deficiency", "Low Blood Sugar",
+}
+
+FONT_NAME = "Arial"
 
 
 # --------------------------------------------------------------------------
@@ -89,7 +112,6 @@ def download_nadac():
     print("Downloading NADAC data...")
     headers = {"User-Agent": "Mozilla/5.0 (compatible; nadac-cpd-pipeline/1.0)"}
 
-    # --- Primary: guess recent dates against the stable direct-download pattern ---
     today = _dt.date.today()
     for days_back in range(0, 28):
         d = today - _dt.timedelta(days=days_back)
@@ -105,7 +127,6 @@ def download_nadac():
             continue
     print("  Date-guessing exhausted 28 days without a hit. Falling back to landing-page scrape...")
 
-    # --- Fallback: scrape the landing page for whatever dated CSV link is currently posted ---
     resp = requests.get(NADAC_LANDING_PAGE, headers=headers, timeout=60)
     resp.raise_for_status()
     matches = re.findall(
@@ -126,29 +147,9 @@ def download_nadac():
     print(f"  Parsed {len(nadac):,} unique NDCs from NADAC.")
     return nadac
 
-HIGH_PA_CATEGORIES = {
-    "Cancer", "Breast Cancer", "Leukemia", "HIV", "Organ Transplant",
-    "Hidradenitis Suppurativa", "Psoriatic Arthritis", "Plaque Psoriasis",
-    "Ulcerative Colitis", "Crohn's Disease", "Multiple sclerosis",
-    "Pulmonary Fibrosis", "Huntington's Disease",
-}
-MODERATE_PA_CATEGORIES = {
-    "Rheumatoid Arthritis", "Gout", "Fertility", "Erectile Dysfunction",
-    "Weight Management", "Migraines", "Endometriosis", "Restless Leg Syndrome",
-    "Overactive Bladder", "Iron Overload", "Wilson Disease", "ALS",
-}
-LOW_PA_CATEGORIES = {
-    "Birth Control", "Infection", "Anti-bacterial", "High Blood Pressure",
-    "High Cholesterol", "Diabetes", "Diuretic", "Steroid", "Pain & Inflammation",
-    "Hormone Therapy", "Thyroid", "Vitamin Deficiency", "Low Blood Sugar",
-}
-
-AWP_MULTIPLIER = {"Branded": 1.25, "Generic": 1.90}
-FONT_NAME = "Arial"
-
 
 # --------------------------------------------------------------------------
-# Step 2: Fetch Cost Plus Drugs catalog
+# Step 2: Fetch Cost Plus Drugs catalog (FULL catalog, kept even when unmatched)
 # --------------------------------------------------------------------------
 def fetch_cpd_catalog():
     print("Fetching Cost Plus Drugs catalog...")
@@ -160,7 +161,7 @@ def fetch_cpd_catalog():
     drugs = []
     for entry in data:
         cpd = entry.get("cpd_channel") or {}
-        if not cpd:
+        if not cpd or cpd.get("price_per_unit") is None:
             continue
         ndcs = entry.get("equivalent_ndcs") or []
         drugs.append({
@@ -181,7 +182,7 @@ def fetch_cpd_catalog():
 
 
 # --------------------------------------------------------------------------
-# Step 3: Match by NDC
+# Step 3: Match by NDC (keeps ALL drugs -- adds nadac=None when no match found)
 # --------------------------------------------------------------------------
 def norm(ndc):
     return (ndc or "").replace("-", "")
@@ -189,10 +190,9 @@ def norm(ndc):
 
 def match_drugs(cpd_drugs, nadac):
     print("Matching by NDC...")
-    matched = []
+    all_drugs = []
+    n_matched = 0
     for d in cpd_drugs:
-        if d["price_per_unit"] is None:
-            continue
         chosen = None
         for ndc in d["ndcs"]:
             key = norm(ndc)
@@ -221,10 +221,15 @@ def match_drugs(cpd_drugs, nadac):
                     rows = sorted(nadac[key], key=lambda r: r["date"])
                     chosen = rows[-1]["price"]
                     break
+
+        rec = {**d, "nadac": chosen}
         if chosen is not None:
-            matched.append({**d, "nadac": chosen})
-    print(f"  Matched {len(matched):,} of {len(cpd_drugs):,} drugs ({len(matched)/len(cpd_drugs)*100:.1f}%).")
-    return matched
+            n_matched += 1
+        all_drugs.append(rec)
+
+    print(f"  Matched {n_matched:,} of {len(all_drugs):,} drugs ({n_matched/len(all_drugs)*100:.1f}%) to NADAC.")
+    print(f"  Keeping all {len(all_drugs):,} drugs -- unmatched ones are flagged, not dropped.")
+    return all_drugs
 
 
 # --------------------------------------------------------------------------
@@ -240,7 +245,7 @@ def classify_pa(d):
     if cats & MODERATE_PA_CATEGORIES:
         score += 1
     pack = d["pack_size"] or 1
-    pack_cost = d["price_per_unit"] * pack
+    pack_cost = (d["price_per_unit"] or 0) * pack
     if pack_cost > 200:
         score += 2
     elif pack_cost > 50:
@@ -257,24 +262,34 @@ def classify_pa(d):
 
 
 def compute_metrics(d):
+    """Returns None fields when there's no NADAC match, rather than raising or faking a number."""
     pack = d["pack_size"] or 1
-    nadac_cost = d["nadac"] * pack
     cpd_bare = d["price_per_unit"] * pack
     cpd_total = cpd_bare + d["fee"] + d["shipping"]
+
+    if d["nadac"] is None:
+        return {
+            "cpd_bare": cpd_bare, "cpd_total": cpd_total,
+            "nadac_cost": None, "est_retail": None,
+            "sav_nadac": None, "sav_retail": None,
+        }
+
+    nadac_cost = d["nadac"] * pack
     mult = AWP_MULTIPLIER.get(d["type"], 1.90)
     est_retail = nadac_cost * mult
     sav_nadac = (nadac_cost - cpd_total) / nadac_cost * 100 if nadac_cost else 0
     sav_retail = (est_retail - cpd_total) / est_retail * 100 if est_retail else 0
     return {
-        "nadac_cost": nadac_cost, "cpd_bare": cpd_bare, "cpd_total": cpd_total,
-        "est_retail": est_retail, "sav_nadac": sav_nadac, "sav_retail": sav_retail,
+        "cpd_bare": cpd_bare, "cpd_total": cpd_total,
+        "nadac_cost": nadac_cost, "est_retail": est_retail,
+        "sav_nadac": sav_nadac, "sav_retail": sav_retail,
     }
 
 
 # --------------------------------------------------------------------------
-# Step 5: Build the Excel workbook
+# Step 5: Build the Excel workbook (matched-only tabs, as before)
 # --------------------------------------------------------------------------
-def build_workbook(matched, out_path):
+def build_workbook(all_drugs, out_path):
     print("Building Excel workbook...")
     header_font = Font(name=FONT_NAME, bold=True, color="FFFFFF", size=10)
     header_fill = PatternFill("solid", start_color="1B3A3A")
@@ -282,9 +297,11 @@ def build_workbook(matched, out_path):
     thin = Side(style="thin", color="D9D9D9")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-    for d in matched:
+    for d in all_drugs:
         d["tier"] = classify_pa(d)
         d["metrics"] = compute_metrics(d)
+
+    matched = [d for d in all_drugs if d["metrics"]["nadac_cost"] is not None]
 
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
@@ -292,12 +309,13 @@ def build_workbook(matched, out_path):
     # --- Summary ---
     summary = wb.create_sheet("Summary")
     summary.cell(row=1, column=1, value="NADAC vs. Cost Plus Drugs — Summary").font = Font(name=FONT_NAME, size=14, bold=True)
-    n = len(matched)
     sav_nadac_all = [d["metrics"]["sav_nadac"] for d in matched]
     sav_retail_all = [d["metrics"]["sav_retail"] for d in matched]
     pa_drugs = [d for d in matched if d["tier"] in ("Moderate", "High")]
     stats = [
-        ("Matched drugs", n),
+        ("Total drugs in Cost Plus catalog", len(all_drugs)),
+        ("Matched to NADAC by NDC", len(matched)),
+        ("Match rate", f"{len(matched)/len(all_drugs)*100:.1f}%"),
         ("Median savings vs. NADAC, incl. fees", f"{st.median(sav_nadac_all):.1f}%"),
         ("Median savings vs. Est. Retail (AWP), incl. fees", f"{st.median(sav_retail_all):.1f}%"),
         ("Moderate/High PA-burden drugs", len(pa_drugs)),
@@ -314,6 +332,7 @@ def build_workbook(matched, out_path):
         "Est. Retail (AWP) uses published industry ratios (Brand x1.25, Generic x1.90), not measured retail prices.",
         "PA Tier is a clinical heuristic (drug class, brand status, cost) -- NOT measured PA/denial data.",
         "Cost Plus does not carry controlled substances or most cold-chain injectables.",
+        "Some catalog drugs have no NADAC match (see 'All Drugs' tab in the online explorer) -- shown, not dropped.",
         "This is a methodology demonstration, not medical or financial advice.",
     ]
     for cv in caveats:
@@ -354,6 +373,31 @@ def build_workbook(matched, out_path):
     rule = ColorScaleRule(start_type="min", start_color="F6E0DA", mid_type="num", mid_value=0,
                            mid_color="FFFFFF", end_type="max", end_color="C8E0CC")
     ws.conditional_formatting.add(f"P2:P{len(matched_sorted)+1}", rule)
+
+    # --- All Drugs (full catalog, incl. unmatched) ---
+    ws_all = wb.create_sheet("All Drugs (Match Status)")
+    headers_all = ["Medication Name", "Brand Name", "Type", "Form", "Strength", "Treatment Categories",
+                   "Pack Size", "Cost Plus/Unit", "In Stock", "Matched to NADAC?"]
+    for col, h in enumerate(headers_all, 1):
+        c = ws_all.cell(row=1, column=col, value=h)
+        c.font = header_font; c.fill = header_fill; c.border = border
+        c.alignment = Alignment(horizontal="center", wrap_text=True)
+    for i, d in enumerate(all_drugs, start=2):
+        vals = [d["name"], d["brand"], d["type"], d["form"], d["strength"], d["categories"],
+                d["pack_size"], d["price_per_unit"], d["in_stock"]]
+        for col, v in enumerate(vals, 1):
+            cell = ws_all.cell(row=i, column=col, value=v)
+            cell.font = body_font; cell.border = border
+        matched_val = "Yes" if d["metrics"]["nadac_cost"] is not None else "No"
+        m_cell = ws_all.cell(row=i, column=10, value=matched_val)
+        m_cell.font = Font(name=FONT_NAME, size=10, bold=(matched_val == "No"),
+                            color="9C3B3B" if matched_val == "No" else "3E6B4A")
+        m_cell.border = border
+    widths_all = [30, 20, 10, 20, 14, 28, 10, 12, 10, 14]
+    for i, w in enumerate(widths_all, 1):
+        ws_all.column_dimensions[get_column_letter(i)].width = w
+    ws_all.freeze_panes = "A2"
+    ws_all.auto_filter.ref = f"A1:J{len(all_drugs)+1}"
 
     # --- Category Analysis ---
     ws2 = wb.create_sheet("Category Analysis")
@@ -413,41 +457,46 @@ def build_workbook(matched, out_path):
 
 
 # --------------------------------------------------------------------------
-# Step 6: Build the interactive HTML explorer
+# Step 6: Build the interactive HTML explorer -- FULL CATALOG, all drugs
 # --------------------------------------------------------------------------
-def build_html_explorer(matched, out_path):
-    print("Building HTML explorer...")
-    pa_data = []
-    for d in matched:
-        tier = classify_pa(d)
-        if tier not in ("Moderate", "High"):
-            continue
-        m = compute_metrics(d)
-        if m["cpd_bare"] <= 0 or m["nadac_cost"] <= 0:
-            continue
-        pa_data.append({
-            "name": d["name"], "brand": d["brand"], "strength": d["strength"], "type": d["type"],
-            "tier": tier, "categories": d["categories"],
-            "cpd_cost": round(m["cpd_bare"], 2), "cpd_total": round(m["cpd_total"], 2),
-            "nadac_cost": round(m["nadac_cost"], 2), "est_retail": round(m["est_retail"], 2),
-            "sav_nadac": round(m["sav_nadac"], 1), "sav_retail": round(m["sav_retail"], 1),
-        })
+def build_html_explorer(all_drugs, out_path):
+    print("Building HTML explorer (full catalog)...")
+    export = []
+    for d in all_drugs:
+        m = d["metrics"]
+        rec = {
+            "name": d["name"], "brand": d["brand"], "strength": d["strength"],
+            "type": d["type"], "form": d["form"], "tier": d["tier"],
+            "categories": d["categories"] or "",
+            "cpd_cost": round(m["cpd_bare"], 2), "in_stock": d["in_stock"],
+            "has_nadac": m["nadac_cost"] is not None,
+        }
+        if m["nadac_cost"] is not None:
+            rec.update({
+                "cpd_total": round(m["cpd_total"], 2),
+                "nadac_cost": round(m["nadac_cost"], 2),
+                "est_retail": round(m["est_retail"], 2),
+                "sav_nadac": round(m["sav_nadac"], 1),
+                "sav_retail": round(m["sav_retail"], 1),
+            })
+        export.append(rec)
 
-    data_json = json.dumps(pa_data)
+    data_json = json.dumps(export)
     template_path = Path(__file__).parent / "explorer_template.html"
     html = template_path.read_text()
     html = html.replace("__DATA_JSON__", data_json)
     out_path.write_text(html)
-    print(f"  Saved {out_path} ({len(pa_data)} drugs)")
+    n_matched = sum(1 for r in export if r["has_nadac"])
+    print(f"  Saved {out_path} ({len(export)} drugs total, {n_matched} NADAC-matched)")
 
 
 # --------------------------------------------------------------------------
 def main():
     nadac = download_nadac()
     cpd_drugs = fetch_cpd_catalog()
-    matched = match_drugs(cpd_drugs, nadac)
-    build_workbook(matched, OUT_DIR / "nadac_vs_costplus.xlsx")
-    build_html_explorer(matched, OUT_DIR / "index.html")
+    all_drugs = match_drugs(cpd_drugs, nadac)
+    build_workbook(all_drugs, OUT_DIR / "nadac_vs_costplus.xlsx")
+    build_html_explorer(all_drugs, OUT_DIR / "index.html")
     print("Done.")
 
 
