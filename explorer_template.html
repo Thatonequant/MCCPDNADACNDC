@@ -226,15 +226,16 @@
       <option value="Branded">Branded</option>
     </select>
   </div>
+  <div class="control-group">
+    <label for="feeToggle">Cost Plus pricing</label>
+    <select id="feeToggle">
+      <option value="withFees">Incl. dispensing fee + shipping</option>
+      <option value="noFees">Price only, excl. fees</option>
+    </select>
+  </div>
 </div>
 
 <div class="stat-row" id="statRow"></div>
-
-<div class="chart-section">
-  <div class="chart-box">
-    <div id="plot" style="width:100%; height:480px;"></div>
-  </div>
-</div>
 
 <div class="table-section">
   <table>
@@ -244,9 +245,9 @@
         <th data-key="strength">Strength</th>
         <th data-key="type">Type</th>
         <th data-key="tier">PA Tier</th>
-        <th data-key="cpd_cost">Cost Plus /Unit Pack</th>
+        <th data-key="cpd_display" id="cpdColHeader">Cost Plus Pack Cost</th>
         <th data-key="nadac_cost">NADAC Pack Cost</th>
-        <th data-key="sav_nadac">Savings vs NADAC</th>
+        <th data-key="sav_display" id="savColHeader">Savings vs NADAC</th>
         <th data-key="in_stock">In Stock</th>
       </tr>
     </thead>
@@ -257,6 +258,12 @@
     <button id="prevPage">&larr; Prev</button>
     <span id="pageInfo"></span>
     <button id="nextPage">Next &rarr;</button>
+  </div>
+</div>
+
+<div class="chart-section">
+  <div class="chart-box">
+    <div id="plot" style="width:100%; height:480px;"></div>
   </div>
 </div>
 
@@ -307,9 +314,29 @@ function applyFilters() {
   });
 }
 
+function feeMode() {
+  return document.getElementById("feeToggle").value; // "withFees" | "noFees"
+}
+
+// Returns the correct cost/savings pair for a drug given the current fee toggle.
+function getDisplayValues(d) {
+  const noFees = feeMode() === "noFees";
+  const cost = noFees ? d.cpd_cost : (d.has_nadac ? d.cpd_total : d.cpd_cost);
+  const sav = d.has_nadac ? (noFees ? d.sav_nadac_nofee : d.sav_nadac) : null;
+  return { cost, sav };
+}
+
 function sortRows(rows) {
+  const noFees = feeMode() === "noFees";
+  // sav_display / cpd_display are virtual sort keys standing in for whichever
+  // fee mode is active, since the underlying field name changes with the toggle.
+  const resolveKey = (d, key) => {
+    if (key === "sav_display") return d.has_nadac ? (noFees ? d.sav_nadac_nofee : d.sav_nadac) : null;
+    if (key === "cpd_display") return noFees ? d.cpd_cost : (d.has_nadac ? d.cpd_total : d.cpd_cost);
+    return d[key];
+  };
   return [...rows].sort((a, b) => {
-    let av = a[sortKey], bv = b[sortKey];
+    let av = resolveKey(a, sortKey), bv = resolveKey(b, sortKey);
     if (av === undefined || av === null) av = sortKey === "name" ? "" : -Infinity;
     if (bv === undefined || bv === null) bv = sortKey === "name" ? "" : -Infinity;
     if (typeof av === "string") {
@@ -322,6 +349,15 @@ function sortRows(rows) {
 function renderTable(rows) {
   const tbody = document.getElementById("tableBody");
   const noResults = document.getElementById("noResults");
+
+  const noFees = feeMode() === "noFees";
+  document.getElementById("cpdColHeader").textContent = noFees
+    ? "Cost Plus Pack Cost (price only)"
+    : "Cost Plus Pack Cost (incl. fees)";
+  document.getElementById("savColHeader").textContent = noFees
+    ? "Savings vs NADAC (price only)"
+    : "Savings vs NADAC (incl. fees)";
+
   if (rows.length === 0) {
     tbody.innerHTML = "";
     noResults.style.display = "block";
@@ -337,17 +373,20 @@ function renderTable(rows) {
   const start = currentPage * PAGE_SIZE;
   const pageRows = rows.slice(start, start + PAGE_SIZE);
 
-  tbody.innerHTML = pageRows.map(d => `
+  tbody.innerHTML = pageRows.map(d => {
+    const { cost, sav } = getDisplayValues(d);
+    return `
     <tr>
       <td>${d.name}${d.brand ? ` <span style="color:#7C6A4F;">(${d.brand})</span>` : ""}</td>
       <td>${d.strength}</td>
       <td>${d.type}</td>
       <td><span class="tier-pill tier-${d.tier}">${d.tier}</span></td>
-      <td>$${d.cpd_cost.toFixed(2)}</td>
+      <td>$${cost.toFixed(2)}</td>
       <td>${d.has_nadac ? "$" + d.nadac_cost.toFixed(2) : '<span class="no-nadac">no match</span>'}</td>
-      <td>${d.has_nadac ? d.sav_nadac.toFixed(1) + "%" : '<span class="no-nadac">&mdash;</span>'}</td>
+      <td>${d.has_nadac ? sav.toFixed(1) + "%" : '<span class="no-nadac">&mdash;</span>'}</td>
       <td>${d.in_stock === "Yes" ? "Yes" : '<span style="color:#9C3B3B;">No</span>'}</td>
-    </tr>`).join("");
+    </tr>`;
+  }).join("");
 
   document.getElementById("pageInfo").textContent =
     `Showing ${start + 1}-${Math.min(start + PAGE_SIZE, rows.length)} of ${rows.length}`;
@@ -356,13 +395,14 @@ function renderTable(rows) {
 }
 
 function renderChart(rows) {
+  const noFees = feeMode() === "noFees";
   const withNadac = rows.filter(d => d.has_nadac && d.cpd_cost > 0);
   const tiers = ["Low", "Moderate", "High"];
   const traces = tiers.map(tier => {
     const tRows = withNadac.filter(d => d.tier === tier);
     return {
-      x: tRows.map(d => d.cpd_cost),
-      y: tRows.map(d => d.sav_nadac),
+      x: tRows.map(d => getDisplayValues(d).cost),
+      y: tRows.map(d => getDisplayValues(d).sav),
       mode: "markers",
       type: "scatter",
       name: `${tier} (n=${tRows.length})`,
@@ -377,8 +417,14 @@ function renderChart(rows) {
     plot_bgcolor: "#FCFAF3",
     font: { family: "Source Sans Pro, sans-serif", color: "#1B3A3A", size: 12 },
     margin: { l: 60, r: 20, t: 10, b: 50 },
-    xaxis: { title: { text: "Cost Plus Pack Cost (USD, log scale)", font: { size: 12.5 } }, type: "log", gridcolor: "#E1D6BC", tickprefix: "$" },
-    yaxis: { title: { text: "Savings vs. NADAC (%)", font: { size: 12.5 } }, gridcolor: "#E1D6BC", zeroline: true, zerolinecolor: "#7C6A4F", zerolinewidth: 1.5, ticksuffix: "%" },
+    xaxis: {
+      title: { text: noFees ? "Cost Plus Pack Cost, price only (USD, log scale)" : "Cost Plus Pack Cost, incl. fees (USD, log scale)", font: { size: 12.5 } },
+      type: "log", gridcolor: "#E1D6BC", tickprefix: "$",
+    },
+    yaxis: {
+      title: { text: noFees ? "Savings vs. NADAC, price only (%)" : "Savings vs. NADAC, incl. fees (%)", font: { size: 12.5 } },
+      gridcolor: "#E1D6BC", zeroline: true, zerolinecolor: "#7C6A4F", zerolinewidth: 1.5, ticksuffix: "%",
+    },
     legend: { orientation: "h", y: -0.22, font: { size: 11.5 } },
     hoverlabel: { bgcolor: "#1B3A3A", font: { color: "#F4EFE3", family: "IBM Plex Mono, monospace", size: 11 } },
   };
@@ -387,17 +433,18 @@ function renderChart(rows) {
 
 function render() {
   const filtered = sortRows(applyFilters());
-  renderChart(filtered);
   renderTable(filtered);
+  renderChart(filtered);
 
   const withNadac = filtered.filter(d => d.has_nadac);
-  const sav = withNadac.map(d => d.sav_nadac);
+  const sav = withNadac.map(d => getDisplayValues(d).sav);
   const inStockCount = filtered.filter(d => d.in_stock === "Yes").length;
+  const feeLabel = feeMode() === "noFees" ? "price only" : "incl. fees";
   document.getElementById("statRow").innerHTML = `
     <span>Showing: <span class="n">${filtered.length.toLocaleString()}</span> of ${DATA.length.toLocaleString()} drugs</span>
     <span>NADAC-matched: <span class="n">${withNadac.length.toLocaleString()}</span></span>
     <span>In stock: <span class="n">${inStockCount.toLocaleString()}</span></span>
-    <span>Median savings vs NADAC: <span class="n">${withNadac.length ? median(sav).toFixed(1) : "—"}%</span></span>
+    <span>Median savings vs NADAC (${feeLabel}): <span class="n">${withNadac.length ? median(sav).toFixed(1) : "—"}%</span></span>
   `;
 }
 
@@ -406,6 +453,7 @@ document.getElementById("tierFilter").addEventListener("change", () => { current
 document.getElementById("stockFilter").addEventListener("change", () => { currentPage = 0; render(); });
 document.getElementById("nadacFilter").addEventListener("change", () => { currentPage = 0; render(); });
 document.getElementById("typeFilter").addEventListener("change", () => { currentPage = 0; render(); });
+document.getElementById("feeToggle").addEventListener("change", () => { currentPage = 0; render(); });
 
 document.querySelectorAll("thead th").forEach(th => {
   th.addEventListener("click", () => {

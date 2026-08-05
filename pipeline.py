@@ -472,12 +472,16 @@ def build_html_explorer(all_drugs, out_path):
             "has_nadac": m["nadac_cost"] is not None,
         }
         if m["nadac_cost"] is not None:
+            sav_nadac_nofee = (m["nadac_cost"] - m["cpd_bare"]) / m["nadac_cost"] * 100 if m["nadac_cost"] else 0
+            sav_retail_nofee = (m["est_retail"] - m["cpd_bare"]) / m["est_retail"] * 100 if m["est_retail"] else 0
             rec.update({
                 "cpd_total": round(m["cpd_total"], 2),
                 "nadac_cost": round(m["nadac_cost"], 2),
                 "est_retail": round(m["est_retail"], 2),
                 "sav_nadac": round(m["sav_nadac"], 1),
                 "sav_retail": round(m["sav_retail"], 1),
+                "sav_nadac_nofee": round(sav_nadac_nofee, 1),
+                "sav_retail_nofee": round(sav_retail_nofee, 1),
             })
         export.append(rec)
 
