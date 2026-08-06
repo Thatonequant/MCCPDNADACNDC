@@ -90,6 +90,98 @@
   }
   .stat-row span.n { font-weight: 600; color: #1B3A3A; }
 
+  .cart-section {
+    max-width: 1280px;
+    margin: 20px auto 0;
+    padding: 0 28px;
+  }
+  .cart-box {
+    background: #FCFAF3;
+    border: 1px solid #C9BB9C;
+    border-radius: 4px;
+    padding: 16px 18px;
+  }
+  .cart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .cart-title {
+    font-family: 'Spectral', serif;
+    font-size: 17px;
+    font-weight: 600;
+    color: #1B3A3A;
+    margin: 0;
+  }
+  .cart-empty {
+    color: #7C6A4F;
+    font-style: italic;
+    font-size: 13px;
+    margin-top: 8px;
+  }
+  .cart-clear {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11.5px;
+    padding: 4px 10px;
+    border: 1px solid #C9BB9C;
+    background: #FCFAF3;
+    color: #9C3B3B;
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  .cart-clear:hover { background: #F6E0DA; }
+  .cart-items {
+    margin-top: 12px;
+    border-top: 1px solid #E1D6BC;
+  }
+  .cart-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 7px 0;
+    border-bottom: 1px solid #E1D6BC;
+    font-size: 13px;
+  }
+  .cart-item-name { color: #1B3A3A; }
+  .cart-item-name .cart-item-strength { color: #7C6A4F; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; }
+  .cart-item-right { display: flex; align-items: center; gap: 14px; }
+  .cart-item-price { font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: #1B3A3A; }
+  .cart-item-nomatch { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #B0A483; font-style: italic; }
+  .cart-remove {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: #9C3B3B;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px 4px;
+  }
+  .cart-remove:hover { text-decoration: underline; }
+  .cart-summary {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 2px double #1B3A3A;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 24px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12.5px;
+    color: #4A4538;
+  }
+  .cart-summary .label { color: #7C6A4F; }
+  .cart-summary .value { color: #1B3A3A; font-weight: 600; text-align: right; }
+  .cart-summary .total-row .label, .cart-summary .total-row .value { color: #1B3A3A; font-size: 14px; }
+  .cart-note {
+    margin-top: 10px;
+    font-size: 11px;
+    color: #7C6A4F;
+    font-style: italic;
+    line-height: 1.5;
+  }
+  .add-checkbox { cursor: pointer; width: 15px; height: 15px; accent-color: #1B3A3A; }
+
   .chart-section {
     max-width: 1280px;
     margin: 22px auto 0;
@@ -237,10 +329,21 @@
 
 <div class="stat-row" id="statRow"></div>
 
+<div class="cart-section">
+  <div class="cart-box">
+    <div class="cart-header">
+      <h2 class="cart-title" id="cartTitle">Order Estimate</h2>
+      <button class="cart-clear" id="cartClear" style="display:none;">Clear all</button>
+    </div>
+    <div id="cartBody"></div>
+  </div>
+</div>
+
 <div class="table-section">
   <table>
     <thead>
       <tr>
+        <th style="cursor:default;">Add</th>
         <th data-key="name">Drug</th>
         <th data-key="strength">Strength</th>
         <th data-key="type">Type</th>
@@ -282,6 +385,21 @@ const PAGE_SIZE = 50;
 let currentPage = 0;
 let sortKey = "sav_nadac";
 let sortDir = "desc";
+
+// --- Order-estimate cart state ---
+const selectedKeys = new Set();
+function drugKey(d) { return `${d.name}|${d.strength}|${d.form}`; }
+function escapeAttr(s) { return String(s).replace(/"/g, "&quot;"); }
+const DATA_BY_KEY = new Map(DATA.map(d => [drugKey(d), d]));
+
+// Cost Plus's published standard shipping tiers (non-expedited), priced per order
+// based on total prescription count, not per drug.
+function standardShippingFor(count) {
+  if (count <= 2) return 5.25;
+  if (count <= 4) return 7.50;
+  if (count <= 6) return 9.50;
+  return 16.00;
+}
 
 const TIER_COLOR = { "Low": "#5B8266", "Moderate": "#C97B2E", "High": "#9C3B3B" };
 
@@ -375,8 +493,11 @@ function renderTable(rows) {
 
   tbody.innerHTML = pageRows.map(d => {
     const { cost, sav } = getDisplayValues(d);
+    const key = drugKey(d);
+    const checked = selectedKeys.has(key) ? "checked" : "";
     return `
     <tr>
+      <td><input type="checkbox" class="add-checkbox" data-key="${escapeAttr(key)}" ${checked}></td>
       <td>${d.name}${d.brand ? ` <span style="color:#7C6A4F;">(${d.brand})</span>` : ""}</td>
       <td>${d.strength}</td>
       <td>${d.type}</td>
@@ -387,6 +508,15 @@ function renderTable(rows) {
       <td>${d.in_stock === "Yes" ? "Yes" : '<span style="color:#9C3B3B;">No</span>'}</td>
     </tr>`;
   }).join("");
+
+  tbody.querySelectorAll(".add-checkbox").forEach(cb => {
+    cb.addEventListener("change", () => {
+      const key = cb.dataset.key;
+      if (cb.checked) selectedKeys.add(key);
+      else selectedKeys.delete(key);
+      renderCart();
+    });
+  });
 
   document.getElementById("pageInfo").textContent =
     `Showing ${start + 1}-${Math.min(start + PAGE_SIZE, rows.length)} of ${rows.length}`;
@@ -431,10 +561,107 @@ function renderChart(rows) {
   Plotly.react("plot", traces, layout, { responsive: true, displayModeBar: true, modeBarButtonsToRemove: ["lasso2d", "select2d"] });
 }
 
+function renderCart() {
+  const cartBody = document.getElementById("cartBody");
+  const cartTitle = document.getElementById("cartTitle");
+  const cartClear = document.getElementById("cartClear");
+  const items = [...selectedKeys].map(k => DATA_BY_KEY.get(k)).filter(Boolean);
+
+  cartTitle.textContent = items.length ? `Order Estimate (${items.length} drug${items.length === 1 ? "" : "s"})` : "Order Estimate";
+  cartClear.style.display = items.length ? "inline-block" : "none";
+
+  if (items.length === 0) {
+    cartBody.innerHTML = `<div class="cart-empty">Check the "Add" box next to any drug below to estimate the cost of filling several prescriptions in one order &mdash; shipping is priced per order, not per drug, so combining prescriptions changes the total.</div>`;
+    return;
+  }
+
+  const noFees = feeMode() === "noFees";
+  const rxCount = items.length;
+  const shipping = standardShippingFor(rxCount);
+
+  let cpdBareTotal = 0, feeTotal = 0, nadacTotal = 0;
+  let matchedCount = 0;
+
+  const itemRows = items.map(d => {
+    cpdBareTotal += d.cpd_cost;
+    feeTotal += (d.fee != null ? d.fee : 5);
+    const key = drugKey(d);
+    let nadacHtml = '<span class="cart-item-nomatch">no NADAC match</span>';
+    if (d.has_nadac) {
+      nadacTotal += d.nadac_cost;
+      matchedCount++;
+      nadacHtml = `NADAC $${d.nadac_cost.toFixed(2)}`;
+    }
+    return `
+      <div class="cart-item">
+        <div class="cart-item-name">${d.name} <span class="cart-item-strength">${d.strength}</span></div>
+        <div class="cart-item-right">
+          <span class="cart-item-price">$${d.cpd_cost.toFixed(2)}</span>
+          <span class="cart-item-nomatch">${nadacHtml}</span>
+          <button class="cart-remove" data-key="${escapeAttr(key)}">remove</button>
+        </div>
+      </div>`;
+  }).join("");
+
+  const cpdTotalWithFees = cpdBareTotal + feeTotal + shipping;
+  const cpdTotalNoFees = cpdBareTotal;
+  const grandTotal = noFees ? cpdTotalNoFees : cpdTotalWithFees;
+
+  let savingsRow = "";
+  if (matchedCount > 0) {
+    const compareTotal = noFees ? cpdBareTotal : cpdTotalWithFees;
+    const savPct = nadacTotal ? (nadacTotal - compareTotal) / nadacTotal * 100 : 0;
+    const unmatchedNote = matchedCount < items.length
+      ? ` (${items.length - matchedCount} of ${items.length} drugs have no NADAC match and are excluded from this comparison)`
+      : "";
+    savingsRow = `
+      <div class="label">Total NADAC pack cost (${matchedCount} matched drug${matchedCount === 1 ? "" : "s"})</div>
+      <div class="value">$${nadacTotal.toFixed(2)}</div>
+      <div class="label total-row">Savings vs. NADAC${unmatchedNote}</div>
+      <div class="value total-row">${savPct.toFixed(1)}%</div>`;
+  }
+
+  cartBody.innerHTML = `
+    <div class="cart-items">${itemRows}</div>
+    <div class="cart-summary">
+      <div class="label">Prescriptions in this order</div>
+      <div class="value">${rxCount}</div>
+      <div class="label">Standard shipping (this order size)</div>
+      <div class="value">$${shipping.toFixed(2)}</div>
+      <div class="label">Dispensing fees (per drug)</div>
+      <div class="value">$${feeTotal.toFixed(2)}</div>
+      <div class="label">Drug cost (price only, before fees)</div>
+      <div class="value">$${cpdBareTotal.toFixed(2)}</div>
+      ${savingsRow}
+      <div class="label total-row">Estimated Cost Plus total${noFees ? " (price only)" : " (incl. fees + shipping)"}</div>
+      <div class="value total-row">$${grandTotal.toFixed(2)}</div>
+    </div>
+    <div class="cart-note">Shipping reflects Cost Plus's published standard (non-expedited) rates, priced once per
+    order by total prescription count: $5.25 for 1&ndash;2, $7.50 for 3&ndash;4, $9.50 for 5&ndash;6, $16.00 for
+    7+. Each drug still carries its own dispensing fee. This estimate assumes one prescription per selected drug
+    and does not account for insurance, coupons, or partial fills.</div>
+  `;
+
+  cartBody.querySelectorAll(".cart-remove").forEach(btn => {
+    btn.addEventListener("click", () => {
+      selectedKeys.delete(btn.dataset.key);
+      renderCart();
+      renderTable(sortRows(applyFilters())); // refresh checkbox states on visible page
+    });
+  });
+}
+
+document.getElementById("cartClear").addEventListener("click", () => {
+  selectedKeys.clear();
+  renderCart();
+  renderTable(sortRows(applyFilters()));
+});
+
 function render() {
   const filtered = sortRows(applyFilters());
   renderTable(filtered);
   renderChart(filtered);
+  renderCart();
 
   const withNadac = filtered.filter(d => d.has_nadac);
   const sav = withNadac.map(d => getDisplayValues(d).sav);

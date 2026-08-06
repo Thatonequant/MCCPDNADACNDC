@@ -470,6 +470,7 @@ def build_html_explorer(all_drugs, out_path):
             "categories": d["categories"] or "",
             "cpd_cost": round(m["cpd_bare"], 2), "in_stock": d["in_stock"],
             "has_nadac": m["nadac_cost"] is not None,
+            "fee": d["fee"],
         }
         if m["nadac_cost"] is not None:
             sav_nadac_nofee = (m["nadac_cost"] - m["cpd_bare"]) / m["nadac_cost"] * 100 if m["nadac_cost"] else 0
