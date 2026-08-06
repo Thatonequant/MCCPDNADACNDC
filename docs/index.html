@@ -579,12 +579,13 @@ function renderCart() {
   const rxCount = items.length;
   const shipping = standardShippingFor(rxCount);
 
-  let cpdBareTotal = 0, feeTotal = 0, nadacTotal = 0;
+  let cpdBareTotal = 0, nadacTotal = 0;
   let matchedCount = 0;
+  const feesInOrder = [];
 
   const itemRows = items.map(d => {
     cpdBareTotal += d.cpd_cost;
-    feeTotal += (d.fee != null ? d.fee : 5);
+    feesInOrder.push(d.fee != null ? d.fee : 5);
     const key = drugKey(d);
     let nadacHtml = '<span class="cart-item-nomatch">no NADAC match</span>';
     if (d.has_nadac) {
@@ -602,6 +603,11 @@ function renderCart() {
         </div>
       </div>`;
   }).join("");
+
+  // Dispensing fee is charged once per order, not once per drug. Where selected
+  // drugs carry different fee tiers (e.g. a $15 cold-chain item alongside $5
+  // standard items), the order is billed at the higher tier.
+  const feeTotal = Math.max(...feesInOrder);
 
   const cpdTotalWithFees = cpdBareTotal + feeTotal + shipping;
   const cpdTotalNoFees = cpdBareTotal;
@@ -628,7 +634,7 @@ function renderCart() {
       <div class="value">${rxCount}</div>
       <div class="label">Standard shipping (this order size)</div>
       <div class="value">$${shipping.toFixed(2)}</div>
-      <div class="label">Dispensing fees (per drug)</div>
+      <div class="label">Dispensing fee (once per order)</div>
       <div class="value">$${feeTotal.toFixed(2)}</div>
       <div class="label">Drug cost (price only, before fees)</div>
       <div class="value">$${cpdBareTotal.toFixed(2)}</div>
@@ -638,8 +644,10 @@ function renderCart() {
     </div>
     <div class="cart-note">Shipping reflects Cost Plus's published standard (non-expedited) rates, priced once per
     order by total prescription count: $5.25 for 1&ndash;2, $7.50 for 3&ndash;4, $9.50 for 5&ndash;6, $16.00 for
-    7+. Each drug still carries its own dispensing fee. This estimate assumes one prescription per selected drug
-    and does not account for insurance, coupons, or partial fills.</div>
+    7+. The dispensing fee is also charged once per order, not per drug &mdash; where selected drugs carry
+    different fee tiers (e.g. a $15 cold-chain item alongside standard $5 items), the higher tier is used for the
+    whole order. This estimate assumes one prescription per selected drug and does not account for insurance,
+    coupons, or partial fills.</div>
   `;
 
   cartBody.querySelectorAll(".cart-remove").forEach(btn => {
