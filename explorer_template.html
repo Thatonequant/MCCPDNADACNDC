@@ -321,7 +321,7 @@
   <div class="control-group">
     <label for="feeToggle">Cost Plus pricing</label>
     <select id="feeToggle">
-      <option value="withFees">Incl. dispensing fee + shipping</option>
+      <option value="withFees">Incl. 15% markup + fees + shipping</option>
       <option value="noFees">Price only, excl. fees</option>
     </select>
   </div>
@@ -436,21 +436,37 @@ function feeMode() {
   return document.getElementById("feeToggle").value; // "withFees" | "noFees"
 }
 
+// A 15% markup applied to the base drug price before fees, in fee-inclusive
+// pricing mode only. Does not apply to the dispensing fee or shipping cost
+// themselves, and does not apply in "price only" mode.
+const MARKUP_RATE = 0.15;
+
 // Returns the correct cost/savings pair for a drug given the current fee toggle.
+// Computed fully client-side (rather than from pipeline-precomputed fields) so
+// the markup can be applied consistently to matched and unmatched drugs alike.
 function getDisplayValues(d) {
   const noFees = feeMode() === "noFees";
-  const cost = noFees ? d.cpd_cost : (d.has_nadac ? d.cpd_total : d.cpd_cost);
-  const sav = d.has_nadac ? (noFees ? d.sav_nadac_nofee : d.sav_nadac) : null;
+  const fee = d.fee != null ? d.fee : 5;
+  const shipping = d.shipping != null ? d.shipping : 5.25;
+
+  let cost;
+  if (noFees) {
+    cost = d.cpd_cost;
+  } else {
+    cost = d.cpd_cost * (1 + MARKUP_RATE) + fee + shipping;
+  }
+
+  let sav = null;
+  if (d.has_nadac) {
+    sav = (d.nadac_cost - cost) / d.nadac_cost * 100;
+  }
   return { cost, sav };
 }
 
 function sortRows(rows) {
-  const noFees = feeMode() === "noFees";
-  // sav_display / cpd_display are virtual sort keys standing in for whichever
-  // fee mode is active, since the underlying field name changes with the toggle.
   const resolveKey = (d, key) => {
-    if (key === "sav_display") return d.has_nadac ? (noFees ? d.sav_nadac_nofee : d.sav_nadac) : null;
-    if (key === "cpd_display") return noFees ? d.cpd_cost : (d.has_nadac ? d.cpd_total : d.cpd_cost);
+    if (key === "sav_display") return getDisplayValues(d).sav;
+    if (key === "cpd_display") return getDisplayValues(d).cost;
     return d[key];
   };
   return [...rows].sort((a, b) => {
@@ -471,10 +487,10 @@ function renderTable(rows) {
   const noFees = feeMode() === "noFees";
   document.getElementById("cpdColHeader").textContent = noFees
     ? "Cost Plus Pack Cost (price only)"
-    : "Cost Plus Pack Cost (incl. fees)";
+    : "Cost Plus Pack Cost (incl. 15% + fees)";
   document.getElementById("savColHeader").textContent = noFees
     ? "Savings vs NADAC (price only)"
-    : "Savings vs NADAC (incl. fees)";
+    : "Savings vs NADAC (incl. 15% + fees)";
 
   if (rows.length === 0) {
     tbody.innerHTML = "";
@@ -548,11 +564,11 @@ function renderChart(rows) {
     font: { family: "Source Sans Pro, sans-serif", color: "#1B3A3A", size: 12 },
     margin: { l: 60, r: 20, t: 10, b: 50 },
     xaxis: {
-      title: { text: noFees ? "Cost Plus Pack Cost, price only (USD, log scale)" : "Cost Plus Pack Cost, incl. fees (USD, log scale)", font: { size: 12.5 } },
+      title: { text: noFees ? "Cost Plus Pack Cost, price only (USD, log scale)" : "Cost Plus Pack Cost, incl. 15% + fees (USD, log scale)", font: { size: 12.5 } },
       type: "log", gridcolor: "#E1D6BC", tickprefix: "$",
     },
     yaxis: {
-      title: { text: noFees ? "Savings vs. NADAC, price only (%)" : "Savings vs. NADAC, incl. fees (%)", font: { size: 12.5 } },
+      title: { text: noFees ? "Savings vs. NADAC, price only (%)" : "Savings vs. NADAC, incl. 15% + fees (%)", font: { size: 12.5 } },
       gridcolor: "#E1D6BC", zeroline: true, zerolinecolor: "#7C6A4F", zerolinewidth: 1.5, ticksuffix: "%",
     },
     legend: { orientation: "h", y: -0.22, font: { size: 11.5 } },
@@ -609,7 +625,11 @@ function renderCart() {
   // standard items), the order is billed at the higher tier.
   const feeTotal = Math.max(...feesInOrder);
 
-  const cpdTotalWithFees = cpdBareTotal + feeTotal + shipping;
+  // The 15% markup applies to the base drug cost only, in fee-inclusive mode.
+  const markupAmount = cpdBareTotal * MARKUP_RATE;
+  const markedUpDrugCost = cpdBareTotal + markupAmount;
+
+  const cpdTotalWithFees = markedUpDrugCost + feeTotal + shipping;
   const cpdTotalNoFees = cpdBareTotal;
   const grandTotal = noFees ? cpdTotalNoFees : cpdTotalWithFees;
 
@@ -627,27 +647,33 @@ function renderCart() {
       <div class="value total-row">${savPct.toFixed(1)}%</div>`;
   }
 
+  const markupRow = noFees ? "" : `
+      <div class="label">15% markup on drug cost</div>
+      <div class="value">$${markupAmount.toFixed(2)}</div>`;
+
   cartBody.innerHTML = `
     <div class="cart-items">${itemRows}</div>
     <div class="cart-summary">
       <div class="label">Prescriptions in this order</div>
       <div class="value">${rxCount}</div>
+      <div class="label">Drug cost (price only, before markup/fees)</div>
+      <div class="value">$${cpdBareTotal.toFixed(2)}</div>
+      ${markupRow}
       <div class="label">Standard shipping (this order size)</div>
       <div class="value">$${shipping.toFixed(2)}</div>
       <div class="label">Dispensing fee (once per order)</div>
       <div class="value">$${feeTotal.toFixed(2)}</div>
-      <div class="label">Drug cost (price only, before fees)</div>
-      <div class="value">$${cpdBareTotal.toFixed(2)}</div>
       ${savingsRow}
-      <div class="label total-row">Estimated Cost Plus total${noFees ? " (price only)" : " (incl. fees + shipping)"}</div>
+      <div class="label total-row">Estimated Cost Plus total${noFees ? " (price only)" : " (incl. 15% + fees + shipping)"}</div>
       <div class="value total-row">$${grandTotal.toFixed(2)}</div>
     </div>
     <div class="cart-note">Shipping reflects Cost Plus's published standard (non-expedited) rates, priced once per
     order by total prescription count: $5.25 for 1&ndash;2, $7.50 for 3&ndash;4, $9.50 for 5&ndash;6, $16.00 for
     7+. The dispensing fee is also charged once per order, not per drug &mdash; where selected drugs carry
     different fee tiers (e.g. a $15 cold-chain item alongside standard $5 items), the higher tier is used for the
-    whole order. This estimate assumes one prescription per selected drug and does not account for insurance,
-    coupons, or partial fills.</div>
+    whole order. A 15% markup is applied to the base drug cost only (not to shipping or the dispensing fee) when
+    "Incl. 15% markup + fees + shipping" is selected above. This estimate assumes one prescription per selected
+    drug and does not account for insurance, coupons, or partial fills.</div>
   `;
 
   cartBody.querySelectorAll(".cart-remove").forEach(btn => {
