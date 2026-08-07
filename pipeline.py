@@ -55,6 +55,7 @@ NADAC_CSV_PATTERN = "https://download.medicaid.gov/data/nadac-national-average-d
 NADAC_LANDING_PAGE = "https://www.medicaid.gov/medicaid/nadac"
 
 AWP_MULTIPLIER = {"Branded": 1.25, "Generic": 1.90}
+MARKUP_RATE = 0.15  # applied to base drug cost only, matching the live HTML explorer
 
 HIGH_PA_CATEGORIES = {
     "Cancer", "Breast Cancer", "Leukemia", "HIV", "Organ Transplant",
@@ -267,11 +268,19 @@ def compute_metrics(d):
     cpd_bare = d["price_per_unit"] * pack
     cpd_total = cpd_bare + d["fee"] + d["shipping"]
 
+    # 15% markup applied to the base drug cost only (not fee or shipping),
+    # mirroring the same logic used in the live HTML explorer's "Incl. 15%
+    # markup + fees + shipping" pricing mode.
+    markup_amount = cpd_bare * MARKUP_RATE
+    cpd_total_markup = cpd_bare + markup_amount + d["fee"] + d["shipping"]
+
     if d["nadac"] is None:
         return {
             "cpd_bare": cpd_bare, "cpd_total": cpd_total,
+            "markup_amount": markup_amount, "cpd_total_markup": cpd_total_markup,
             "nadac_cost": None, "est_retail": None,
             "sav_nadac": None, "sav_retail": None,
+            "sav_nadac_markup": None, "sav_retail_markup": None,
         }
 
     nadac_cost = d["nadac"] * pack
@@ -279,9 +288,13 @@ def compute_metrics(d):
     est_retail = nadac_cost * mult
     sav_nadac = (nadac_cost - cpd_total) / nadac_cost * 100 if nadac_cost else 0
     sav_retail = (est_retail - cpd_total) / est_retail * 100 if est_retail else 0
+    sav_nadac_markup = (nadac_cost - cpd_total_markup) / nadac_cost * 100 if nadac_cost else 0
+    sav_retail_markup = (est_retail - cpd_total_markup) / est_retail * 100 if est_retail else 0
     return {
         "cpd_bare": cpd_bare, "cpd_total": cpd_total,
+        "markup_amount": markup_amount, "cpd_total_markup": cpd_total_markup,
         "nadac_cost": nadac_cost, "est_retail": est_retail,
+        "sav_nadac_markup": sav_nadac_markup, "sav_retail_markup": sav_retail_markup,
         "sav_nadac": sav_nadac, "sav_retail": sav_retail,
     }
 
@@ -311,13 +324,16 @@ def build_workbook(all_drugs, out_path):
     summary.cell(row=1, column=1, value="NADAC vs. Cost Plus Drugs — Summary").font = Font(name=FONT_NAME, size=14, bold=True)
     sav_nadac_all = [d["metrics"]["sav_nadac"] for d in matched]
     sav_retail_all = [d["metrics"]["sav_retail"] for d in matched]
+    sav_nadac_markup_all = [d["metrics"]["sav_nadac_markup"] for d in matched]
+    sav_retail_markup_all = [d["metrics"]["sav_retail_markup"] for d in matched]
     pa_drugs = [d for d in matched if d["tier"] in ("Moderate", "High")]
     stats = [
         ("Total drugs in Cost Plus catalog", len(all_drugs)),
         ("Matched to NADAC by NDC", len(matched)),
         ("Match rate", f"{len(matched)/len(all_drugs)*100:.1f}%"),
-        ("Median savings vs. NADAC, incl. fees", f"{st.median(sav_nadac_all):.1f}%"),
-        ("Median savings vs. Est. Retail (AWP), incl. fees", f"{st.median(sav_retail_all):.1f}%"),
+        ("Median savings vs. NADAC, incl. 15% + fees", f"{st.median(sav_nadac_markup_all):.1f}%"),
+        ("Median savings vs. NADAC, fees only (no markup)", f"{st.median(sav_nadac_all):.1f}%"),
+        ("Median savings vs. Est. Retail (AWP), incl. 15% + fees", f"{st.median(sav_retail_markup_all):.1f}%"),
         ("Moderate/High PA-burden drugs", len(pa_drugs)),
         ("Data refreshed", __import__("datetime").datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")),
     ]
@@ -328,6 +344,7 @@ def build_workbook(all_drugs, out_path):
         r += 1
     r += 1
     caveats = [
+        "A 15% markup is applied to the base drug cost only (not shipping or the dispensing fee) in all 'incl. 15% + fees' figures -- an assumption for this analysis, not a number sourced from Cost Plus.",
         "NADAC is acquisition cost, not what a cash-pay patient is billed at the counter.",
         "Est. Retail (AWP) uses published industry ratios (Brand x1.25, Generic x1.90), not measured retail prices.",
         "PA Tier is a clinical heuristic (drug class, brand status, cost) -- NOT measured PA/denial data.",
@@ -345,16 +362,26 @@ def build_workbook(all_drugs, out_path):
     summary.column_dimensions["B"].width = 22
 
     # --- Matched (full data) ---
-    ws = wb.create_sheet("Matched (Incl. Fees)")
+    ws = wb.create_sheet("Matched (Incl. 15% + Fees)")
+    note_row = ("Cost Plus Total (Fees Only) excludes the 15% markup; Cost Plus Total (15% + Fees) includes it. "
+                "The markup applies to the base drug cost only, not to the dispensing fee or shipping. Both are "
+                "shown so you can see the markup's isolated impact on savings.")
+    ws.cell(row=1, column=1, value=note_row).font = Font(name=FONT_NAME, size=9, italic=True, color="7C6A4F")
+    ws.cell(row=1, column=1).alignment = Alignment(wrap_text=True)
+    ws.merge_cells("A1:R1")
+    ws.row_dimensions[1].height = 30
+
     headers = ["Medication Name", "Brand Name", "Type", "Form", "Strength", "Treatment Categories",
                "Pack Size", "NADAC/Unit", "Cost Plus/Unit", "Fee", "Shipping", "PA Tier",
-               "NADAC Pack Cost", "Cost Plus Total", "Savings vs NADAC (%)", "Savings vs Retail/AWP (%)", "In Stock"]
+               "NADAC Pack Cost", "Cost Plus Total (Fees Only)", "Cost Plus Total (15% + Fees)",
+               "Savings vs NADAC, Fees Only (%)", "Savings vs NADAC, 15% + Fees (%)", "In Stock"]
+    hr = 3
     for col, h in enumerate(headers, 1):
-        c = ws.cell(row=1, column=col, value=h)
+        c = ws.cell(row=hr, column=col, value=h)
         c.font = header_font; c.fill = header_fill; c.border = border
         c.alignment = Alignment(horizontal="center", wrap_text=True)
-    matched_sorted = sorted(matched, key=lambda d: -d["metrics"]["sav_retail"])
-    for i, d in enumerate(matched_sorted, start=2):
+    matched_sorted = sorted(matched, key=lambda d: -d["metrics"]["sav_retail_markup"])
+    for i, d in enumerate(matched_sorted, start=hr + 1):
         m = d["metrics"]
         vals = [d["name"], d["brand"], d["type"], d["form"], d["strength"], d["categories"],
                 d["pack_size"], d["nadac"], d["price_per_unit"], d["fee"], d["shipping"], d["tier"]]
@@ -362,17 +389,18 @@ def build_workbook(all_drugs, out_path):
             cell = ws.cell(row=i, column=col, value=v)
             cell.font = body_font; cell.border = border
         for col, val, fmt in [(13, m["nadac_cost"], "$#,##0.00"), (14, m["cpd_total"], "$#,##0.00"),
-                               (15, m["sav_nadac"]/100, "0.0%"), (16, m["sav_retail"]/100, "0.0%")]:
+                               (15, m["cpd_total_markup"], "$#,##0.00"),
+                               (16, m["sav_nadac"]/100, "0.0%"), (17, m["sav_nadac_markup"]/100, "0.0%")]:
             cell = ws.cell(row=i, column=col, value=val); cell.font = body_font; cell.border = border; cell.number_format = fmt
-        ws.cell(row=i, column=17, value=d["in_stock"]).font = body_font
-    widths = [30, 20, 10, 20, 14, 28, 10, 12, 12, 8, 8, 12, 14, 14, 14, 16, 10]
+        ws.cell(row=i, column=18, value=d["in_stock"]).font = body_font
+    widths = [30, 20, 10, 20, 14, 28, 10, 12, 12, 8, 8, 12, 14, 18, 18, 16, 16, 10]
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
-    ws.freeze_panes = "A2"
-    ws.auto_filter.ref = f"A1:Q{len(matched_sorted)+1}"
+    ws.freeze_panes = f"A{hr+1}"
+    ws.auto_filter.ref = f"A{hr}:R{len(matched_sorted)+hr}"
     rule = ColorScaleRule(start_type="min", start_color="F6E0DA", mid_type="num", mid_value=0,
                            mid_color="FFFFFF", end_type="max", end_color="C8E0CC")
-    ws.conditional_formatting.add(f"P2:P{len(matched_sorted)+1}", rule)
+    ws.conditional_formatting.add(f"Q{hr+1}:Q{len(matched_sorted)+hr}", rule)
 
     # --- All Drugs (full catalog, incl. unmatched) ---
     ws_all = wb.create_sheet("All Drugs (Match Status)")
@@ -428,28 +456,29 @@ def build_workbook(all_drugs, out_path):
     # --- PA Burden (Moderate/High) with AWP comparison ---
     ws3 = wb.create_sheet("PA Burden - Est. Retail (AWP)")
     note = ("Moderate/High PA-burden drugs (heuristic classification). Est. Retail uses published "
-            "NADAC-to-AWP ratios (Brand x1.25, Generic x1.90) -- an industry rule of thumb, not measured pricing.")
+            "NADAC-to-AWP ratios (Brand x1.25, Generic x1.90) -- an industry rule of thumb, not measured pricing. "
+            "Cost Plus Total includes the 15% markup on base drug cost plus the dispensing fee and shipping.")
     ws3.cell(row=1, column=1, value=note).font = Font(name=FONT_NAME, size=9, italic=True, color="7C6A4F")
     ws3.merge_cells("A1:H1")
-    ws3.row_dimensions[1].height = 30
+    ws3.row_dimensions[1].height = 40
     headers3 = ["Medication Name", "Strength", "PA Tier", "NADAC Pack Cost", "Est. Retail (AWP)",
-                "Cost Plus Total", "Savings vs NADAC (%)", "Savings vs Retail (%)"]
+                "Cost Plus Total (Incl. 15% + Fees)", "Savings vs NADAC (%)", "Savings vs Retail (%)"]
     for col, h in enumerate(headers3, 1):
         c = ws3.cell(row=3, column=col, value=h); c.font = header_font; c.fill = header_fill; c.border = border
-    pa_sorted = sorted(pa_drugs, key=lambda d: -d["metrics"]["sav_retail"])
+    pa_sorted = sorted(pa_drugs, key=lambda d: -d["metrics"]["sav_retail_markup"])
     for i, d in enumerate(pa_sorted, start=4):
         m = d["metrics"]
         vals = [d["name"], d["strength"], d["tier"]]
         for col, v in enumerate(vals, 1):
             ws3.cell(row=i, column=col, value=v).font = body_font
         for col, val, fmt in [(4, m["nadac_cost"], "$#,##0.00"), (5, m["est_retail"], "$#,##0.00"),
-                               (6, m["cpd_total"], "$#,##0.00"), (7, m["sav_nadac"]/100, "0.0%"),
-                               (8, m["sav_retail"]/100, "0.0%")]:
+                               (6, m["cpd_total_markup"], "$#,##0.00"), (7, m["sav_nadac_markup"]/100, "0.0%"),
+                               (8, m["sav_retail_markup"]/100, "0.0%")]:
             cell = ws3.cell(row=i, column=col, value=val); cell.font = body_font; cell.number_format = fmt
     ws3.column_dimensions["A"].width = 30
     ws3.column_dimensions["B"].width = 14
     for col_letter in ["C", "D", "E", "F", "G", "H"]:
-        ws3.column_dimensions[col_letter].width = 16
+        ws3.column_dimensions[col_letter].width = 18
     ws3.freeze_panes = "A4"
 
     wb.save(out_path)
