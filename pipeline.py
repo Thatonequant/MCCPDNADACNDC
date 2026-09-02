@@ -55,7 +55,9 @@ NADAC_CSV_PATTERN = "https://download.medicaid.gov/data/nadac-national-average-d
 NADAC_LANDING_PAGE = "https://www.medicaid.gov/medicaid/nadac"
 
 AWP_MULTIPLIER = {"Branded": 1.25, "Generic": 1.90}
-MARKUP_RATE = 0.15  # applied to base drug cost only, matching the live HTML explorer
+MARKUP_RATE = 0.0  # The API unit_price ALREADY includes Cost Plus's 15% margin (verified against
+                   # the official API docs quote example and Lalani et al. 2022 published prices),
+                   # so no additional markup is applied. Kept as a parameter for sensitivity checks.
 
 HIGH_PA_CATEGORIES = {
     "Cancer", "Breast Cancer", "Leukemia", "HIV", "Organ Transplant",
@@ -268,9 +270,7 @@ def compute_metrics(d):
     cpd_bare = d["price_per_unit"] * pack
     cpd_total = cpd_bare + d["fee"] + d["shipping"]
 
-    # 15% markup applied to the base drug cost only (not fee or shipping),
-    # mirroring the same logic used in the live HTML explorer's "Incl. 15%
-    # markup + fees + shipping" pricing mode.
+    # MARKUP_RATE is 0: the API unit_price already includes the 15% margin.
     markup_amount = cpd_bare * MARKUP_RATE
     cpd_total_markup = cpd_bare + markup_amount + d["fee"] + d["shipping"]
 
@@ -331,9 +331,9 @@ def build_workbook(all_drugs, out_path):
         ("Total drugs in Cost Plus catalog", len(all_drugs)),
         ("Matched to NADAC by NDC", len(matched)),
         ("Match rate", f"{len(matched)/len(all_drugs)*100:.1f}%"),
-        ("Median savings vs. NADAC, incl. 15% + fees", f"{st.median(sav_nadac_markup_all):.1f}%"),
-        ("Median savings vs. NADAC, fees only (no markup)", f"{st.median(sav_nadac_all):.1f}%"),
-        ("Median savings vs. Est. Retail (AWP), incl. 15% + fees", f"{st.median(sav_retail_markup_all):.1f}%"),
+        ("Median savings vs. NADAC, incl. fees + shipping", f"{st.median(sav_nadac_markup_all):.1f}%"),
+        ("Median savings vs. NADAC, fees only (cross-check)", f"{st.median(sav_nadac_all):.1f}%"),
+        ("Median savings vs. Est. Retail (AWP), incl. fees + shipping", f"{st.median(sav_retail_markup_all):.1f}%"),
         ("Moderate/High PA-burden drugs", len(pa_drugs)),
         ("Data refreshed", __import__("datetime").datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")),
     ]
@@ -344,7 +344,7 @@ def build_workbook(all_drugs, out_path):
         r += 1
     r += 1
     caveats = [
-        "A 15% markup is applied to the base drug cost only (not shipping or the dispensing fee) in all 'incl. 15% + fees' figures -- an assumption for this analysis, not a number sourced from Cost Plus.",
+        "Cost Plus unit prices from the API already include the company's 15% margin; no additional markup is applied. Fee-inclusive figures add the API-reported dispensing fee and standard shipping.",
         "NADAC is acquisition cost, not what a cash-pay patient is billed at the counter.",
         "Est. Retail (AWP) uses published industry ratios (Brand x1.25, Generic x1.90), not measured retail prices.",
         "PA Tier is a clinical heuristic (drug class, brand status, cost) -- NOT measured PA/denial data.",
@@ -362,10 +362,9 @@ def build_workbook(all_drugs, out_path):
     summary.column_dimensions["B"].width = 22
 
     # --- Matched (full data) ---
-    ws = wb.create_sheet("Matched (Incl. 15% + Fees)")
-    note_row = ("Cost Plus Total (Fees Only) excludes the 15% markup; Cost Plus Total (15% + Fees) includes it. "
-                "The markup applies to the base drug cost only, not to the dispensing fee or shipping. Both are "
-                "shown so you can see the markup's isolated impact on savings.")
+    ws = wb.create_sheet("Matched (Incl. Fees)")
+    note_row = ("Cost Plus unit prices already include the 15% margin. Cost Plus Total adds the API-reported "
+                "dispensing fee and standard shipping for a single fill; no additional markup is applied.")
     ws.cell(row=1, column=1, value=note_row).font = Font(name=FONT_NAME, size=9, italic=True, color="7C6A4F")
     ws.cell(row=1, column=1).alignment = Alignment(wrap_text=True)
     ws.merge_cells("A1:R1")
@@ -373,8 +372,8 @@ def build_workbook(all_drugs, out_path):
 
     headers = ["Medication Name", "Brand Name", "Type", "Form", "Strength", "Treatment Categories",
                "Pack Size", "NADAC/Unit", "Cost Plus/Unit", "Fee", "Shipping", "PA Tier",
-               "NADAC Pack Cost", "Cost Plus Total (Fees Only)", "Cost Plus Total (15% + Fees)",
-               "Savings vs NADAC, Fees Only (%)", "Savings vs NADAC, 15% + Fees (%)", "In Stock"]
+               "NADAC Pack Cost", "Cost Plus Total (Fees Only)", "Cost Plus Total (Incl. Fees)",
+               "Savings vs NADAC, Fees Only (%)", "Savings vs NADAC, Incl. Fees (%)", "In Stock"]
     hr = 3
     for col, h in enumerate(headers, 1):
         c = ws.cell(row=hr, column=col, value=h)
@@ -457,12 +456,12 @@ def build_workbook(all_drugs, out_path):
     ws3 = wb.create_sheet("PA Burden - Est. Retail (AWP)")
     note = ("Moderate/High PA-burden drugs (heuristic classification). Est. Retail uses published "
             "NADAC-to-AWP ratios (Brand x1.25, Generic x1.90) -- an industry rule of thumb, not measured pricing. "
-            "Cost Plus Total includes the 15% markup on base drug cost plus the dispensing fee and shipping.")
+            "Cost Plus Total includes the dispensing fee and shipping; unit prices already include the 15% margin.")
     ws3.cell(row=1, column=1, value=note).font = Font(name=FONT_NAME, size=9, italic=True, color="7C6A4F")
     ws3.merge_cells("A1:H1")
     ws3.row_dimensions[1].height = 40
     headers3 = ["Medication Name", "Strength", "PA Tier", "NADAC Pack Cost", "Est. Retail (AWP)",
-                "Cost Plus Total (Incl. 15% + Fees)", "Savings vs NADAC (%)", "Savings vs Retail (%)"]
+                "Cost Plus Total (Incl. Fees)", "Savings vs NADAC (%)", "Savings vs Retail (%)"]
     for col, h in enumerate(headers3, 1):
         c = ws3.cell(row=3, column=col, value=h); c.font = header_font; c.fill = header_fill; c.border = border
     pa_sorted = sorted(pa_drugs, key=lambda d: -d["metrics"]["sav_retail_markup"])
