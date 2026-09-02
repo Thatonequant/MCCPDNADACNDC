@@ -1,0 +1,41 @@
+cff-version: 1.2.0
+message: "If you use this pipeline or its data snapshot, please cite it as below."
+type: software
+title: "NDC-Level Comparison of Mark Cuban Cost Plus Drug Company Pricing Against the CMS National Average Drug Acquisition Cost Benchmark: An Automated Open-Source Pipeline"
+abstract: "Weekly-refreshing pipeline that retrieves the complete Cost Plus Drugs catalog from the company's public pricing API, matches each product by 11-digit National Drug Code to the CMS NADAC weekly reference file, and computes fee-exclusive and fee-inclusive price comparisons against acquisition cost and an AWP-derived retail cash floor. Includes the interactive catalog explorer, the multi-tab analysis workbook, and the script that reproduces the tables and figure reported in the accompanying manuscript."
+authors:
+  - family-names: Igarashi
+    given-names: Yuichi
+    orcid: "https://orcid.org/0009-0006-0898-4560"
+    affiliation: "Department of Physical Medicine and Rehabilitation, University of Miami Miller School of Medicine / Jackson Health System, Miami, FL, USA"
+version: 1.0.0
+date-released: 2026-09-02
+repository-code: "https://github.com/Thatonequant/MCCPDNADACNDC"
+url: "https://thatonequant.github.io/MCCPDNADACNDC/"
+license: MIT
+keywords:
+  - drug pricing
+  - cost-plus pricing
+  - NADAC
+  - Cost Plus Drugs
+  - National Drug Code
+  - prescription drug affordability
+  - pharmacoeconomics
+  - price transparency
+references:
+  - type: data
+    title: "National Average Drug Acquisition Cost (NADAC) weekly reference file"
+    authors:
+      - name: "Centers for Medicare & Medicaid Services"
+    url: "https://www.medicaid.gov/medicaid/nadac"
+  - type: data
+    title: "Cost Plus Drugs public pricing API"
+    authors:
+      - name: "Mark Cuban Cost Plus Drug Company"
+    url: "https://costplusdrugs.github.io/apidocs/"
+  - type: data
+    title: "Cost Plus Drugs pricing API endpoint (api.costplusdrugs.com/pricelist/cpd)"
+    notes: "Endpoint provided directly by Cost Plus Drugs (R. Harrison, personal communication)."
+    authors:
+      - name: "Mark Cuban Cost Plus Drug Company"
+    url: "https://api.costplusdrugs.com/pricelist/cpd"
